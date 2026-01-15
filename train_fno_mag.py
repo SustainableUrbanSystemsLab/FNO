@@ -4,7 +4,8 @@ from torch.utils.data import DataLoader, TensorDataset
 from fno2d_model import FNO2d, sensor_weighted_mse
 from gh_to_fno import build_input_tensor_from_gh
 
-DATA_FOLDER = "./train_xlsx"
+
+DATA_FOLDER = "./train_csv"
 MODEL_OUT = "fno_mag_weights.pth"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH = 2; EPOCHS = 40; LR = 1e-3
@@ -21,12 +22,12 @@ def infer_grid(xs, ys, tol=1e-6):
     idx=[(key_y[kyv], key_x[kxv]) for kxv,kyv in zip(kx,ky)]
     return len(ux), len(uy), idx
 
-files = sorted(glob.glob(os.path.join(DATA_FOLDER,"*.xlsx")))
+files = sorted(glob.glob(os.path.join(DATA_FOLDER,"*.csv")))
 if not files: raise RuntimeError("No training files in " + DATA_FOLDER)
 Xs=[]; Ys=[]; Masks=[]
 print("Preparing dataset from", len(files), "files...")
 for fp in files:
-    df = pd.read_excel(fp)
+    df = pd.read_csv(fp)
     cols = ['SDF','Bldg_height','Z_relative','U_at_z','X_coords','Y_coords','dir_sin','dir_cos']
     if any(c not in df.columns for c in cols):
         raise RuntimeError(fp + " missing input columns")
