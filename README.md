@@ -27,6 +27,12 @@ Optional columns:
    ```bash
    pip install torch pandas numpy
    ```
+   Or usage with `uv`:
+   ```bash
+   uv sync
+   # or
+   uv pip install -r requirements.txt
+   ```
 3. Train:
    ```bash
    python train_fno_mag.py
