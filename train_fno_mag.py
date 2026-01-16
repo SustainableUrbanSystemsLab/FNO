@@ -8,7 +8,7 @@ from gh_to_fno import build_input_tensor_from_gh
 DATA_FOLDER = "./train_csv"
 MODEL_OUT = "fno_mag_weights.pth"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-BATCH = 2; EPOCHS = 40; LR = 1e-3
+BATCH = 8; EPOCHS = 1000; LR = 1e-3
 MODES1=20; MODES2=20; WIDTH=64; N_LAYERS=4
 FORCE_H = None; FORCE_W = None
 
@@ -108,8 +108,14 @@ Y_all = pad_to_max(Ys, max_h, max_w).to(DEVICE)
 M_all = pad_to_max(Masks, max_h, max_w).to(DEVICE)
 print("Dataset shapes", X_all.shape, Y_all.shape, M_all.shape)
 
+# Grouping Strategy:
+# We sort files so that all 8 wind directions for "Case 0" are consecutive, then "Case 1", etc.
+# We set BATCH=8 and shuffle=False.
+# This ensures each training step sees ALL directions for ONE building geometry.
+# This forces the model to learn how the fixed geometry interacts with changing wind.
+
 dataset = TensorDataset(X_all, Y_all, M_all)
-loader = DataLoader(dataset, batch_size=BATCH, shuffle=True)
+loader = DataLoader(dataset, batch_size=BATCH, shuffle=False)
 
 in_ch = X_all.shape[1]
 model = FNO2d(in_channels=in_ch, out_channels=1, modes1=MODES1, modes2=MODES2, width=WIDTH, n_layers=N_LAYERS).to(DEVICE)

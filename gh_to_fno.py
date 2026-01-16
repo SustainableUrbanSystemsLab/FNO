@@ -60,6 +60,29 @@ def build_input_tensor_from_gh(gh_outputs, H=None, W=None, include_U_ref_channel
         if U_ref_scalar is None:
             raise ValueError("U_ref_scalar required")
         channels.append(np.full((H_grid, W_grid), float(U_ref_scalar), dtype=dtype))
+    # Normalize X and Y channels to [0,1] for FNO stability
+    # Channel 4 is X, Channel 5 is Y
+    x_grid = channels[4] # raw values
+    y_grid = channels[5] # raw values
+    
+    # Avoid nan min/max
+    x_valid = x_grid[~np.isnan(x_grid)]
+    y_valid = y_grid[~np.isnan(y_grid)]
+    
+    if len(x_valid) > 0:
+        x_min, x_max = x_valid.min(), x_valid.max()
+        if x_max > x_min:
+            channels[4] = (channels[4] - x_min) / (x_max - x_min)
+        else:
+            channels[4].fill(0.0) # Flat
+            
+    if len(y_valid) > 0:
+        y_min, y_max = y_valid.min(), y_valid.max()
+        if y_max > y_min:
+            channels[5] = (channels[5] - y_min) / (y_max - y_min)
+        else:
+            channels[5].fill(0.0)
+
     channel_stack = np.stack([np.nan_to_num(ch, nan=0.0) for ch in channels], axis=0)
     X = torch.from_numpy(channel_stack.astype(dtype)).unsqueeze(0).to(device)
     return X, ch_names + (['U_ref'] if include_U_ref_channel else [])
