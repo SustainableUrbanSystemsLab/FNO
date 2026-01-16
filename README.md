@@ -22,7 +22,7 @@ Optional columns:
 - `U_ref` : only used at inference to output physical mag (optional)
 
 ## How to use
-1. Put training CSV files into `train_csv/` (one file per sample). Ensure each file forms a regular grid (nx*ny == n_points) or set `FORCE_H`/`FORCE_W` in `train_fno_mag.py`.
+1. Put training CSV files into `train_csv/` (one file per sample). The files can be sparse or masked (points don't need to form a perfect rectangle).
 2. Install requirements:
    ```bash
    pip install torch pandas numpy
@@ -38,6 +38,9 @@ Optional columns:
    python train_fno_mag.py
    ```
    Model saved as `fno_mag_weights.pth`.
+   Intermediate epoch checkpoints are saved in the `epochs/` folder.
+   
+   **Note**: The training script supports sparse/masked grids (where points are missing). Infinite target values are automatically ignored in the loss.
 4. Inference:
    - Edit `run_inference_mag.py` to set `CSV` path and `MODEL` path if needed.
    - Run:

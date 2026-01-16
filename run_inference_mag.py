@@ -1,5 +1,5 @@
 import pandas as pd, numpy as np, torch
-from gh_to_fno import build_input_tensor_from_gh
+from gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
 from fno2d_model import FNO2d
 
 CSV = "gh_outputs_2dec.csv"   # change as needed
@@ -8,6 +8,10 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ROUND = 2
 
 df = pd.read_csv(CSV)
+# Renaming known variations
+rename_map = {'X': 'X_coords', 'Y': 'Y_coords', 'x': 'X_coords', 'y': 'Y_coords'}
+df.rename(columns=rename_map, inplace=True)
+
 cols = ['SDF','Bldg_height','Z_relative','U_at_z','X_coords','Y_coords','dir_sin','dir_cos']
 for c in cols:
     if c not in df.columns:
@@ -22,11 +26,9 @@ with torch.no_grad():
     mag_star = model(X.to(DEVICE)).cpu().numpy()[0,0]  # dimensionless grid (H,W)
 
 # flatten to original points (attempt grid reshape)
-nx = df['X_coords'].nunique(); ny = df['Y_coords'].nunique()
-if nx * ny == len(df):
-    flat = mag_star.reshape(-1)[:len(df)]
-else:
-    flat = mag_star.ravel()[:len(df)]
+# Robustly map predictions back to original points (handles sparse/unsorted)
+nx, ny, _, _, idx_map = infer_grid_from_coords_simple(df['X_coords'], df['Y_coords'])
+flat = np.array([mag_star[iy, ix] for (iy, ix) in idx_map])
 
 # write dimensionless predictions; if U_ref present also write physical mag
 df['mag_U_pred_dimensionless'] = np.round(flat, ROUND)

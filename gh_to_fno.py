@@ -8,8 +8,8 @@ def infer_grid_from_coords_simple(xs, ys, tol=1e-6):
     ky = np.round(ys / tol).astype(int)
     ux = np.unique(kx); uy = np.unique(ky)
     nx = len(ux); ny = len(uy)
-    if nx * ny != len(xs):
-        return None
+    # if nx * ny != len(xs):
+    #     return None
     ux_sorted = np.sort(ux); uy_sorted = np.sort(uy)
     key_to_ix = {k:i for i,k in enumerate(ux_sorted)}
     key_to_iy = {k:i for i,k in enumerate(uy_sorted)}

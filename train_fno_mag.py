@@ -16,7 +16,7 @@ def infer_grid(xs, ys, tol=1e-6):
     xs=np.array(xs); ys=np.array(ys)
     kx=np.round(xs/tol).astype(int); ky=np.round(ys/tol).astype(int)
     ux=np.unique(kx); uy=np.unique(ky)
-    if len(ux)*len(uy)!=len(xs): return None
+    # if len(ux)*len(uy)!=len(xs): return None
     key_x={k:i for i,k in enumerate(np.sort(ux))}
     key_y={k:i for i,k in enumerate(np.sort(uy))}
     idx=[(key_y[kyv], key_x[kxv]) for kxv,kyv in zip(kx,ky)]
@@ -28,6 +28,10 @@ Xs=[]; Ys=[]; Masks=[]
 print("Preparing dataset from", len(files), "files...")
 for fp in files:
     df = pd.read_csv(fp)
+    # Renaming known variations
+    rename_map = {'X': 'X_coords', 'Y': 'Y_coords', 'x': 'X_coords', 'y': 'Y_coords'}
+    df.rename(columns=rename_map, inplace=True)
+
     cols = ['SDF','Bldg_height','Z_relative','U_at_z','X_coords','Y_coords','dir_sin','dir_cos']
     if any(c not in df.columns for c in cols):
         raise RuntimeError(fp + " missing input columns")
@@ -63,8 +67,17 @@ for fp in files:
     Y_grid = np.zeros((1, ny, nx), dtype=np.float32) * np.nan
     mask_grid = np.zeros((1, ny, nx), dtype=np.float32)
     for i,(iy,ix) in enumerate(idx_map):
-        Y_grid[0, iy, ix] = float(mag_vals[i])
-        mask_grid[0, iy, ix] = float(df['is_sensor'].iloc[i]) if 'is_sensor' in df.columns else 1.0
+        val = mag_vals[i]
+        # finite check
+        if not np.isfinite(val):
+            val = 0.0
+            valid_val = 0.0
+        else:
+            valid_val = 1.0
+        
+        Y_grid[0, iy, ix] = float(val)
+        sensor_w = float(df['is_sensor'].iloc[i]) if 'is_sensor' in df.columns else 1.0
+        mask_grid[0, iy, ix] = sensor_w * valid_val
 
     Y_grid = np.nan_to_num(Y_grid, nan=0.0)
     Xs.append(X_tensor.squeeze(0))
@@ -92,6 +105,11 @@ for epoch in range(1, EPOCHS+1):
         opt.zero_grad(); loss.backward(); opt.step()
         running += float(loss.item()) * xb.shape[0]
     print(f"Epoch {epoch}/{EPOCHS} loss {running/len(dataset):.6e}")
-    torch.save(model.state_dict(), MODEL_OUT + f".epoch{epoch}")
+    
+    # Save epoch checkpoint to epochs/ folder
+    os.makedirs("epochs", exist_ok=True)
+    epoch_path = os.path.join("epochs", MODEL_OUT + f".epoch{epoch}")
+    torch.save(model.state_dict(), epoch_path)
+
 torch.save(model.state_dict(), MODEL_OUT)
 print("Training finished. Saved:", MODEL_OUT)
