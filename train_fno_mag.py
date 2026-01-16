@@ -84,9 +84,28 @@ for fp in files:
     Ys.append(torch.from_numpy(Y_grid))
     Masks.append(torch.from_numpy(mask_grid))
 
-X_all = torch.stack(Xs, dim=0).to(DEVICE)
-Y_all = torch.stack(Ys, dim=0).to(DEVICE)
-M_all = torch.stack(Masks, dim=0).to(DEVICE)
+# Pad tensors to same size (max H, max W) to allow stacking
+max_h = max(t.shape[1] for t in Xs)
+max_w = max(t.shape[2] for t in Xs)
+print(f"Max grid size found: {max_h}x{max_w}. Padding smaller grids...")
+
+import torch.nn.functional as F
+def pad_to_max(t_list, h, w):
+    padded = []
+    for t in t_list:
+        # t shape: (C, H_curr, W_curr)
+        # Pad right and bottom
+        pad_h = h - t.shape[1]
+        pad_w = w - t.shape[2]
+        # F.pad expects (left, right, top, bottom)
+        # We want (0, pad_w, 0, pad_h)
+        p = F.pad(t, (0, pad_w, 0, pad_h), mode='constant', value=0)
+        padded.append(p)
+    return torch.stack(padded, dim=0)
+
+X_all = pad_to_max(Xs, max_h, max_w).to(DEVICE)
+Y_all = pad_to_max(Ys, max_h, max_w).to(DEVICE)
+M_all = pad_to_max(Masks, max_h, max_w).to(DEVICE)
 print("Dataset shapes", X_all.shape, Y_all.shape, M_all.shape)
 
 dataset = TensorDataset(X_all, Y_all, M_all)
@@ -96,6 +115,12 @@ in_ch = X_all.shape[1]
 model = FNO2d(in_channels=in_ch, out_channels=1, modes1=MODES1, modes2=MODES2, width=WIDTH, n_layers=N_LAYERS).to(DEVICE)
 opt = torch.optim.Adam(model.parameters(), lr=LR)
 
+# Early Stopping parameters
+EPOCHS = 1000  # Increased max epochs
+PATIENCE = 50  # Stop if no improvement for 50 epochs
+best_loss = float('inf')
+patience_counter = 0
+
 for epoch in range(1, EPOCHS+1):
     model.train(); running=0.0
     for xb, yb, mb in loader:
@@ -104,12 +129,29 @@ for epoch in range(1, EPOCHS+1):
         loss = sensor_weighted_mse(pred, yb, sensor_mask=mb)
         opt.zero_grad(); loss.backward(); opt.step()
         running += float(loss.item()) * xb.shape[0]
-    print(f"Epoch {epoch}/{EPOCHS} loss {running/len(dataset):.6e}")
     
-    # Save epoch checkpoint to epochs/ folder
-    os.makedirs("epochs", exist_ok=True)
-    epoch_path = os.path.join("epochs", MODEL_OUT + f".epoch{epoch}")
-    torch.save(model.state_dict(), epoch_path)
+    avg_loss = running/len(dataset)
+    print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e}")
+    
+    # Save epoch checkpoint history (every 10 epochs)
+    if epoch % 10 == 0:
+        os.makedirs("epochs", exist_ok=True)
+        epoch_path = os.path.join("epochs", MODEL_OUT + f".epoch{epoch}")
+        torch.save(model.state_dict(), epoch_path)
 
-torch.save(model.state_dict(), MODEL_OUT)
-print("Training finished. Saved:", MODEL_OUT)
+    # Check for improvement (Early Stopping)
+    if avg_loss < best_loss:
+        best_loss = avg_loss
+        patience_counter = 0
+        # Save BEST model to main file
+        torch.save(model.state_dict(), MODEL_OUT)
+        print(f"  > New best loss! Saved {MODEL_OUT}")
+    else:
+        patience_counter += 1
+        print(f"  > No improvement. Patience {patience_counter}/{PATIENCE}")
+        if patience_counter >= PATIENCE:
+            print(f"Early stopping triggered at epoch {epoch}")
+            break
+
+print(f"Training finished. Best loss: {best_loss:.6e}")
+print("Saved best model to:", MODEL_OUT)
