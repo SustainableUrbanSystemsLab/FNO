@@ -41,12 +41,27 @@ for CSV in files:
         gh = {c:df[c].tolist() for c in cols}
         X, chs = build_input_tensor_from_gh(gh, H=None, W=None, device=DEVICE)
         
+        # DEBUG: Check if inputs are actually different
+        # Channel 0=SDF, 4=X_norm, 5=Y_norm
+        print(f"  Input Stats:")
+        print(f"    SDF:  min={X[0,0].min():.4f}, max={X[0,0].max():.4f}, mean={X[0,0].mean():.4f}")
+        print(f"    NormX: min={X[0,4].min():.4f}, max={X[0,4].max():.4f}")
+        print(f"    NormY: min={X[0,5].min():.4f}, max={X[0,5].max():.4f}")
+
+        
+        # Init model if needed
         # Init model if needed
         if model is None:
-            in_ch = X.shape[1]
-            model = FNO2d(in_channels=in_ch, out_channels=1, modes1=20, modes2=20, width=64, n_layers=4).to(DEVICE)
-            model.load_state_dict(torch.load(model_path, map_location=DEVICE))
-            model.eval()
+            try:
+                in_ch = X.shape[1]
+                m = FNO2d(in_channels=in_ch, out_channels=1, modes1=20, modes2=20, width=64, n_layers=4).to(DEVICE)
+                m.load_state_dict(torch.load(model_path, map_location=DEVICE))
+                m.eval()
+                model = m
+            except Exception as e:
+                print(f"CRITICAL: Failed to load model {model_path}: {e}")
+                # Do not proceed with this file or future files if model is broken
+                break
 
         with torch.no_grad():
             mag_star = model(X.to(DEVICE)).cpu().numpy()[0,0]  # dimensionless grid (H,W)

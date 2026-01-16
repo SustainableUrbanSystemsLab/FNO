@@ -161,3 +161,37 @@ for epoch in range(1, EPOCHS+1):
 
 print(f"Training finished. Best loss: {best_loss:.6e}")
 print("Saved best model to:", MODEL_OUT)
+
+# Feature Importance Analysis
+# The first layer 'in_proj' is a 1x1 conv projecting Inputs -> Latent Width
+# We can estimate importance by the strength of the connection weights.
+try:
+    print("\n--- Feature Importance (based on in_proj weights) ---")
+    # Weights shape: (Width, In_Channels, 1, 1)
+    w = model.in_proj.weight.detach().cpu().numpy()
+    # L2 norm over the projection dimension (Width)
+    # Result shape: (In_Channels,)
+    importance = np.linalg.norm(w.squeeze(), axis=0)
+    
+    # Normalize to percentage
+    importance_pct = 100.0 * importance / importance.sum()
+    
+    # We captured 'chs' (channel names) in the loop: "tuple"
+    # Convert 'chs' to list if it's not already
+    feature_names = list(chs)
+    
+    # Sort and print
+    indices = np.argsort(importance)[::-1]
+    
+    with open("feature_importance.txt", "w") as f:
+        f.write("Feature Importance Score (%)\n")
+        f.write("----------------------------\n")
+        for i in indices:
+            name = feature_names[i] if i < len(feature_names) else f"Ch_{i}"
+            msg = f"{name:15s}: {importance_pct[i]:.2f}%"
+            print(msg)
+            f.write(msg + "\n")
+    print("Saved to feature_importance.txt")
+
+except Exception as e:
+    print(f"Failed to calculate feature importance: {e}")
