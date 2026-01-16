@@ -119,7 +119,8 @@ loader = DataLoader(dataset, batch_size=BATCH, shuffle=False)
 
 in_ch = X_all.shape[1]
 model = FNO2d(in_channels=in_ch, out_channels=1, modes1=MODES1, modes2=MODES2, width=WIDTH, n_layers=N_LAYERS).to(DEVICE)
-opt = torch.optim.Adam(model.parameters(), lr=LR)
+opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
+scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=200, gamma=0.5)
 
 # Early Stopping parameters
 EPOCHS = 1000  # Increased max epochs
@@ -159,6 +160,7 @@ for epoch in range(1, EPOCHS+1):
         loss = sensor_weighted_mse(pred, yb, sensor_mask=mb)
         opt.zero_grad(); loss.backward(); opt.step()
         running += float(loss.item()) * xb.shape[0]
+    scheduler.step()
     
     avg_loss = running/len(dataset)
     print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e}")
