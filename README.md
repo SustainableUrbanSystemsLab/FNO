@@ -27,8 +27,9 @@ Optional columns:
    ```bash
    pip install torch pandas numpy
    ```
-   Or usage with `uv`:
+   Or usage with `uv` (Recommended Python 3.10-3.12):
    ```bash
+   uv python pin 3.12
    uv sync
    # or
    uv pip install -r requirements.txt
