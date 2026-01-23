@@ -23,57 +23,66 @@ def build_input_tensor_from_gh(gh_outputs, H=None, W=None, include_U_ref_channel
     for k in required:
         if k not in gh_outputs:
             raise ValueError(f"Missing GH output '{k}'")
+    
     N = len(gh_outputs['SDF'])
-    if not all(len(gh_outputs[k]) == N for k in required):
-        raise ValueError("All lists must have same length")
-    xs = gh_outputs['X_coords']; ys = gh_outputs['Y_coords']
+    xs = np.array(gh_outputs['X_coords'], dtype=float)
+    ys = np.array(gh_outputs['Y_coords'], dtype=float)
+    hs = np.array(gh_outputs['Bldg_height'], dtype=float)
+
+    # 1. Grid Inference
     infer = infer_grid_from_coords_simple(xs, ys)
     if infer is not None:
         nx, ny, xs_vals, ys_vals, idx_map = infer
-        W_infer = nx; H_infer = ny
     else:
-        if H is None or W is None:
-            raise ValueError("Grid inference failed. Provide H and W") 
-        H_infer = H; W_infer = W
-        coords = np.vstack([ys, xs]).T
-        order = np.lexsort((coords[:,1], -coords[:,0]))
-        idx_map = [None]*N
-        for i, oi in enumerate(order):
-            iy = i // W_infer
-            ix = i % W_infer
-            idx_map[oi] = (iy, ix)
-    H_grid = H_infer; W_grid = W_infer
-    channels = []
-    ch_names = ['SDF','Bldg_height','Z_relative','U_at_z','X_coords','Y_coords','dir_sin','dir_cos']
-    for _ in ch_names:
-        channels.append(np.full((H_grid, W_grid), np.nan, dtype=dtype))
+        if H is None or W is None: raise ValueError("Grid inference failed") 
+        nx, ny = W, H
+        # Simple row-major fallback
+        idx_map = [(i//nx, i%nx) for i in range(N)]
+
+    # 2. Centering Strategy
+    # We use building center to make the model map-independent
+    bldg_mask = hs > 0
+    if bldg_mask.any():
+        x_center = np.mean(xs[bldg_mask])
+        y_center = np.mean(ys[bldg_mask])
+    else:
+        x_center, y_center = np.mean(xs), np.mean(ys)
+
+    # 3. Channel Population
+    ch_names = ['SDF','Bldg_height','Z_relative','U_at_z','X_local','Y_local','dir_sin','dir_cos']
+    channels = [np.zeros((ny, nx), dtype=dtype) for _ in ch_names]
+    
     for pt_idx, (iy, ix) in enumerate(idx_map):
         channels[0][iy, ix] = float(gh_outputs['SDF'][pt_idx])
-        channels[1][iy, ix] = float(gh_outputs['Bldg_height'][pt_idx])
+        channels[1][iy, ix] = hs[pt_idx]
         channels[2][iy, ix] = float(gh_outputs['Z_relative'][pt_idx])
-        channels[3][iy, ix] = float(gh_outputs['U_at_z'][pt_idx])  # user provides dimensionless U_at_z
-        channels[4][iy, ix] = float(gh_outputs['X_coords'][pt_idx])
-        channels[5][iy, ix] = float(gh_outputs['Y_coords'][pt_idx])
-        channels[6][iy, ix] = float(gh_outputs['dir_sin'][pt_idx])
+        channels[3][iy, ix] = float(gh_outputs['U_at_z'][pt_idx])
+        channels[4][iy, ix] = xs[pt_idx] - x_center
+        channels[5][iy, ix] = ys[pt_idx] - y_center
+        channels[6][iy, ix] = float(gh_outputs['dir_sin'][pt_idx]) 
         channels[7][iy, ix] = float(gh_outputs['dir_cos'][pt_idx])
-    if include_U_ref_channel:
-        if U_ref_scalar is None:
-            raise ValueError("U_ref_scalar required")
-        channels.append(np.full((H_grid, W_grid), float(U_ref_scalar), dtype=dtype))
-    # Normalize all channels to roughly [0, 1] range
-    # 0: SDF, 1: Bldg_height, 2: Z_relative, 3: U_at_z, 4: X, 5: Y, 6: sin, 7: cos
-    for i in range(len(channels)):
-        ch = channels[i]
-        valid = ch[~np.isnan(ch)]
-        if len(valid) > 0:
-            c_min, c_max = valid.min(), valid.max()
-            if c_max > c_min:
-                channels[i] = (ch - c_min) / (c_max - c_min)
-            else:
-                channels[i] = ch - c_min # Will be all zeros
-        else:
-            channels[i] = np.zeros_like(ch)
 
-    channel_stack = np.stack([np.nan_to_num(ch, nan=0.0) for ch in channels], axis=0)
-    X = torch.from_numpy(channel_stack.astype(dtype)).unsqueeze(0).to(device)
+
+    # 4. Fixed Physical Normalization (Crucial for generalization)
+    # Balanced denominators so all features are roughly in the same O(1) range
+    channels[0] /= 200.0   # SDF (0-200m -> 0.0-1.0) - Sharper building sensitivity
+    channels[1] /= 50.0    # Bldg_height (0-50m -> 0.0-1.0)
+    channels[2] /= 10.0    # Z_relative (0-10m -> 0.0-1.0) - High sensitivity for shear
+    channels[4] /= 500.0   # X_local (-500 to 500 -> -1.0 to 1.0)
+    channels[5] /= 500.0   # Y_local (-500 to 500 -> -1.0 to 1.0)
+
+    # Note: U_at_z is usually 0.1 to 1.0. We'll give it a slight boost to help the Conv1x1.
+    channels[3] *= 2.0     # U_at_z boost
+    
+    # Wind direction components are already -1.0 to 1.0
+    channels[6] *= 1.0     # dir_sin
+    channels[7] *= 1.0     # dir_cos
+
+    # Handle U_ref if needed
+    if include_U_ref_channel:
+        if U_ref_scalar is None: raise ValueError("U_ref_scalar required")
+        channels.append(np.full((ny, nx), float(U_ref_scalar), dtype=dtype))
+
+    channel_stack = np.stack(channels, axis=0)
+    X = torch.from_numpy(channel_stack).unsqueeze(0).to(device)
     return X, ch_names + (['U_ref'] if include_U_ref_channel else [])

@@ -54,7 +54,8 @@ for CSV in files:
         if model is None:
             try:
                 in_ch = X.shape[1]
-                m = FNO2d(in_channels=in_ch, out_channels=1, modes1=20, modes2=20, width=64, n_layers=4).to(DEVICE)
+                # High-Fidelity Hybrid Model (matching train_fno_mag.py)
+                m = FNO2d(in_channels=in_ch, out_channels=1, modes1=32, modes2=32, width=64, n_layers=5).to(DEVICE)
                 m.load_state_dict(torch.load(model_path, map_location=DEVICE))
                 m.eval()
                 model = m
@@ -70,11 +71,20 @@ for CSV in files:
         nx, ny, _, _, idx_map = infer_grid_from_coords_simple(df['X_coords'], df['Y_coords'])
         flat = np.array([mag_star[iy, ix] for (iy, ix) in idx_map])
 
-        # write dimensionless predictions; if U_ref present also write physical mag
-        df['mag_U'] = np.round(flat, ROUND)
+        # ✅ Enforce physical bounds on predicted deficit
+        flat = np.clip(flat, -1.0, 0.5)
+        
+        # ✅ Quick sanity test
+        print(f"  Pred delta_u stats: min={flat.min():.3f}, mean={flat.mean():.3f}, max={flat.max():.3f}")
+
+        # ✅ Reconstruct explicitly: U = U_at_z * (1 + delta)
+        u_at_z_series = df['U_at_z'].to_numpy()
+        mag_U_final = u_at_z_series * (1.0 + flat)
+        
+        df['mag_U'] = np.round(mag_U_final, ROUND)
         if 'U_ref' in df.columns:
             Uref = float(df['U_ref'].iloc[0])
-            df['mag_U_pred'] = np.round(flat * Uref, ROUND)
+            df['mag_U_pred'] = np.round(mag_U_final * Uref, ROUND)
         
         # Rename back to x, y for output consistency
         df.rename(columns={'X_coords': 'x', 'Y_coords': 'y'}, inplace=True)

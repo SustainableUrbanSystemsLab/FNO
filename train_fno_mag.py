@@ -8,8 +8,8 @@ from gh_to_fno import build_input_tensor_from_gh
 DATA_FOLDER = "./train_csv"
 MODEL_OUT = "fno_mag_weights.pth"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-BATCH = 8; EPOCHS = 1000; LR = 1e-3
-MODES1=20; MODES2=20; WIDTH=64; N_LAYERS=4
+BATCH = 4; EPOCHS = 400; LR = 1e-3
+MODES1=32; MODES2=32; WIDTH=64; N_LAYERS=5
 FORCE_H = None; FORCE_W = None
 
 def infer_grid(xs, ys, tol=1e-6):
@@ -21,6 +21,23 @@ def infer_grid(xs, ys, tol=1e-6):
     key_y={k:i for i,k in enumerate(np.sort(uy))}
     idx=[(key_y[kyv], key_x[kxv]) for kxv,kyv in zip(kx,ky)]
     return len(ux), len(uy), idx
+
+# Cleanup old files that might be corrupted or locked
+if os.path.exists(MODEL_OUT):
+    try: os.remove(MODEL_OUT)
+    except: pass
+if os.path.exists(MODEL_OUT + ".tmp"):
+    try: os.remove(MODEL_OUT + ".tmp")
+    except: pass
+
+# EMERGENCY CLEANUP: Free up space by deleting old epoch history
+import shutil
+if os.path.exists("epochs"):
+    try: shutil.rmtree("epochs", ignore_errors=True)
+    except: pass
+if os.path.exists("../epochs"): # Check parent too if being run from subfolder
+    try: shutil.rmtree("../epochs", ignore_errors=True)
+    except: pass
 
 files = sorted(glob.glob(os.path.join(DATA_FOLDER,"*.csv")))
 if not files: raise RuntimeError("No training files in " + DATA_FOLDER)
@@ -68,16 +85,31 @@ for fp in files:
     mask_grid = np.zeros((1, ny, nx), dtype=np.float32)
     for i,(iy,ix) in enumerate(idx_map):
         val = mag_vals[i]
-        # finite check
+        u_at_z_val = float(df['U_at_z'].iloc[i])
+        
+        # ✅ Precision Enhancement: Interior Punishment
+        # We don't just 'mask' buildings (weight=0). We 'punish' the model if it 
+        # tries to put wind inside them. This forces the boundary to stay sharp.
         if not np.isfinite(val):
-            val = 0.0
-            valid_val = 0.0
+            val = 0.0              # Target Speed = 0
+            valid_val = 0.2        # Interior punishment weight (prev: 0.0)
         else:
             valid_val = 1.0
         
-        Y_grid[0, iy, ix] = float(val)
+        # Target: Deficit relative to local inlet profile
+        delta_u_normalized = (val - u_at_z_val) / (u_at_z_val + 1e-6)
+        delta_u_normalized = np.clip(delta_u_normalized, -1.0, 0.5)
+        
+        Y_grid[0, iy, ix] = float(delta_u_normalized)
+        
         sensor_w = float(df['is_sensor'].iloc[i]) if 'is_sensor' in df.columns else 1.0
-        mask_grid[0, iy, ix] = sensor_w * valid_val
+        sdf_val = max(float(df['SDF'].iloc[i]), 0.0)
+        
+        # ✅ Physics weight: Stronger SDF-weighted loss
+        # alpha=9.0 gives 10x weight at the wall, decaying with distance L=5.0m
+        sdf_w = 1.0 + 9.0 * np.exp(-sdf_val / 5.0)
+            
+        mask_grid[0, iy, ix] = sensor_w * valid_val * sdf_w
 
     Y_grid = np.nan_to_num(Y_grid, nan=0.0)
     Xs.append(X_tensor.squeeze(0))
@@ -123,7 +155,7 @@ opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
 scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=200, gamma=0.5)
 
 # Early Stopping parameters
-EPOCHS = 1000  # Increased max epochs
+EPOCHS = 200  # Increased max epochs
 PATIENCE = 50  # Stop if no improvement for 50 epochs
 best_loss = float('inf')
 patience_counter = 0
@@ -166,10 +198,14 @@ for epoch in range(1, EPOCHS+1):
     print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e}")
     
     # Save epoch checkpoint history (every 10 epochs)
-    if epoch % 10 == 0:
+    if epoch % 100 == 0:
         os.makedirs("epochs", exist_ok=True)
         epoch_path = os.path.join("epochs", MODEL_OUT + f".epoch{epoch}")
-        torch.save(model.state_dict(), epoch_path)
+        # Atomic save for epoch checkpoints
+        temp_epoch = epoch_path + ".tmp"
+        torch.save(model.state_dict(), temp_epoch)
+        if os.path.exists(epoch_path): os.remove(epoch_path)
+        os.rename(temp_epoch, epoch_path)
         
         # Save feature importance
         save_feature_importance(model, chs, epoch_num=epoch)
@@ -179,7 +215,11 @@ for epoch in range(1, EPOCHS+1):
         best_loss = avg_loss
         patience_counter = 0
         # Save BEST model to main file
-        torch.save(model.state_dict(), MODEL_OUT)
+        # Atomic save: save to temp and rename to prevent corruption
+        temp_out = MODEL_OUT + ".tmp"
+        torch.save(model.state_dict(), temp_out)
+        if os.path.exists(MODEL_OUT): os.remove(MODEL_OUT)
+        os.rename(temp_out, MODEL_OUT)
         print(f"  > New best loss! Saved {MODEL_OUT}")
     else:
         patience_counter += 1
