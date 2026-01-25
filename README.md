@@ -23,16 +23,10 @@ Optional columns:
 
 ## How to use
 1. Put training CSV files into `train_csv/` (one file per sample). The files can be sparse or masked (points don't need to form a perfect rectangle).
-2. Install requirements:
-   ```bash
-   pip install torch pandas numpy
-   ```
-   Or usage with `uv` (Recommended Python 3.10-3.12):
+2. Setup with `uv` (Recommended Python 3.12):
    ```bash
    uv python pin 3.12
    uv sync
-   # or
-   uv pip install -r requirements.txt
    ```
 3. Train:
    ```bash

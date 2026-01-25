@@ -1,4 +1,5 @@
 import pandas as pd, numpy as np, torch, os, glob, re
+from tqdm import tqdm
 from gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
 from fno2d_model import FNO2d
 
@@ -23,9 +24,9 @@ else:
     files = [f for f in files if "_pred.csv" not in f]
     print(f"Found {len(files)} files in {TEST_FOLDER}")
 
-for CSV in files:
+for CSV in tqdm(files, desc="Batch Inference"):
     out_name = CSV.replace('.csv', '_pred.csv')
-    print(f"Processing {CSV} -> {out_name}")
+    # print(f"Processing {CSV} -> {out_name}")
     
     try:
         df = pd.read_csv(CSV)

@@ -1,5 +1,6 @@
 # Train FNO to predict dimensionless magnitude (mag_U)
 import os, glob, numpy as np, pandas as pd, torch
+from tqdm import tqdm
 from torch.utils.data import DataLoader, TensorDataset
 from fno2d_model import FNO2d, sensor_weighted_mse
 from gh_to_fno import build_input_tensor_from_gh
@@ -46,7 +47,7 @@ files = sorted(
 if not files: raise RuntimeError("No training files in " + DATA_FOLDER)
 Xs=[]; Ys=[]; Masks=[]
 print("Preparing dataset from", len(files), "files...")
-for fp in files:
+for fp in tqdm(files, desc="Data Preparation"):
     df = pd.read_csv(fp)
     # Renaming known variations
     rename_map = {'X': 'X_coords', 'Y': 'Y_coords', 'x': 'X_coords', 'y': 'Y_coords'}
@@ -189,12 +190,14 @@ def save_feature_importance(model, feature_names, epoch_num=None):
 
 for epoch in range(1, EPOCHS+1):
     model.train(); running=0.0
-    for xb, yb, mb in loader:
+    pbar = tqdm(loader, desc=f"Epoch {epoch}/{EPOCHS}", leave=False)
+    for xb, yb, mb in pbar:
         xb = xb.float(); yb = yb.float(); mb = mb.float()
         pred = model(xb)
         loss = sensor_weighted_mse(pred, yb, sensor_mask=mb)
         opt.zero_grad(); loss.backward(); opt.step()
         running += float(loss.item()) * xb.shape[0]
+        pbar.set_postfix({"loss": f"{loss.item():.4e}"})
     scheduler.step()
     
     avg_loss = running/len(dataset)
