@@ -62,7 +62,6 @@ def build_input_tensor_from_gh(gh_outputs, H=None, W=None, include_U_ref_channel
         channels[6][iy, ix] = float(gh_outputs['dir_sin'][pt_idx]) 
         channels[7][iy, ix] = float(gh_outputs['dir_cos'][pt_idx])
 
-
     # 4. Fixed Physical Normalization (Crucial for generalization)
     # Balanced denominators so all features are roughly in the same O(1) range
     channels[0] /= 200.0   # SDF (0-200m -> 0.0-1.0) - Sharper building sensitivity

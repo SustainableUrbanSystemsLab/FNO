@@ -3210,3 +3210,91 @@ Z_relative     : 8.37%
 dir_sin        : 8.18%
 X_local        : 6.76%
 Y_local        : 6.57%
+
+Epoch 100 Importance
+------------------------------
+Bldg_height    : 30.12%
+Z_relative     : 10.80%
+dir_sin        : 10.59%
+X_local        : 10.24%
+dir_cos        : 10.09%
+U_at_z         : 10.04%
+Y_local        : 9.30%
+SDF            : 8.83%
+
+Epoch 200 Importance
+------------------------------
+Bldg_height    : 38.41%
+Z_relative     : 10.22%
+U_at_z         : 10.22%
+dir_cos        : 9.56%
+dir_sin        : 9.03%
+SDF            : 8.97%
+Y_local        : 7.27%
+X_local        : 6.32%
+
+Epoch 300 Importance
+------------------------------
+Bldg_height    : 40.55%
+dir_cos        : 10.83%
+SDF            : 10.41%
+dir_sin        : 9.95%
+U_at_z         : 9.64%
+Y_local        : 7.23%
+X_local        : 5.73%
+Z_relative     : 5.66%
+
+Epoch 400 Importance
+------------------------------
+Bldg_height    : 39.73%
+dir_cos        : 11.91%
+SDF            : 11.44%
+dir_sin        : 11.07%
+U_at_z         : 9.34%
+Y_local        : 6.81%
+X_local        : 5.47%
+Z_relative     : 4.23%
+
+Epoch 500 Importance
+------------------------------
+Bldg_height    : 38.22%
+SDF            : 12.56%
+dir_cos        : 12.32%
+dir_sin        : 11.59%
+U_at_z         : 9.20%
+Y_local        : 6.61%
+X_local        : 5.46%
+Z_relative     : 4.05%
+
+Final Importance
+------------------------------
+Bldg_height    : 38.22%
+SDF            : 12.56%
+dir_cos        : 12.32%
+dir_sin        : 11.59%
+U_at_z         : 9.20%
+Y_local        : 6.61%
+X_local        : 5.46%
+Z_relative     : 4.05%
+
+Epoch 100 Importance
+------------------------------
+Bldg_height    : 26.34%
+dir_sin        : 11.31%
+X_local        : 11.10%
+U_at_z         : 11.02%
+Y_local        : 10.70%
+dir_cos        : 10.48%
+Z_relative     : 10.48%
+SDF            : 8.58%
+
+Epoch 200 Importance
+------------------------------
+Bldg_height    : 38.51%
+U_at_z         : 10.65%
+dir_sin        : 9.85%
+Z_relative     : 9.64%
+dir_cos        : 9.42%
+SDF            : 8.36%
+Y_local        : 6.80%
+X_local        : 6.78%

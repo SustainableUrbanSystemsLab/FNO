@@ -5,12 +5,8 @@ This package contains scripts to train a Fourier Neural Operator (FNO) to predic
 - `fno2d_model.py` : FNO model and loss utility
 - `gh_to_fno.py` : helpers to build (1,C,H,W) input tensor from GH CSV columns
 - `train_fno_mag.py` : training script. Expects a folder `train_csv/` with one CSV per sample.
-- `run_inference_mag.py` : inference script that reads all CSVs in `test_csv/` and writes predictions
+- `run_inference_mag.py` : inference script that reads a single CSV and writes predictions
 - `README.md` : this file
-
-## Outputs
-- `fno_mag_weights.pth` : Trained model weights
-- `feature_importance.txt` : Log of feature importance during training
 
 ## Input CSV format (rows = points)
 Required input columns (per sample):
@@ -47,15 +43,12 @@ Optional columns:
    
    **Note**: The training script supports sparse/masked grids (where points are missing). Infinite target values are automatically ignored in the loss.
 4. Inference:
-   - Put test CSV files into `test_csv/`.
+   - Edit `run_inference_mag.py` to set `CSV` path and `MODEL` path if needed.
    - Run:
    ```bash
    python run_inference_mag.py
    ```
-   - The script will process **all** `.csv` files in `test_csv/` (skipping existing `_pred.csv` files).
-   - Output files `*_pred.csv` will contain:
-     - `mag_U` (dimensionless prediction)
-     - `mag_U_pred` (physical prediction if `U_ref` was present in input)
+   Output file `*_mag_pred.csv` will contain `mag_U_pred_dimensionless` (and `mag_U_pred` if `U_ref` exists).
 
 ## Notes
 - The code assumes inputs are **dimensionless** where indicated (you said you'll provide dimensionless `U_at_z` and `mag_U`). The scripts do not re-normalize `U_at_z`.

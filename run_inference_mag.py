@@ -54,20 +54,19 @@ for CSV in files:
         if model is None:
             try:
                 in_ch = X.shape[1]
-                # High-Fidelity Hybrid Model (matching train_fno_mag.py)
+                # Reverted to Width 64 for sharper boundaries
                 m = FNO2d(in_channels=in_ch, out_channels=1, modes1=32, modes2=32, width=64, n_layers=5).to(DEVICE)
                 m.load_state_dict(torch.load(model_path, map_location=DEVICE))
                 m.eval()
                 model = m
             except Exception as e:
-                print(f"CRITICAL: Failed to load model {model_path}: {e}")
-                # Do not proceed with this file or future files if model is broken
+                print(f"Failed to load model: {e}")
                 break
 
         with torch.no_grad():
-            mag_star = model(X.to(DEVICE)).cpu().numpy()[0,0]  # dimensionless grid (H,W)
-
-        # Robustly map predictions back to original points (handles sparse/unsorted)
+            pred = model(X.to(DEVICE))
+        
+        mag_star = pred[0, 0].cpu().numpy()
         nx, ny, _, _, idx_map = infer_grid_from_coords_simple(df['X_coords'], df['Y_coords'])
         flat = np.array([mag_star[iy, ix] for (iy, ix) in idx_map])
 
@@ -77,9 +76,13 @@ for CSV in files:
         # ✅ Quick sanity test
         print(f"  Pred delta_u stats: min={flat.min():.3f}, mean={flat.mean():.3f}, max={flat.max():.3f}")
 
+        # ✅ Wind Tuning Knob: "tune the wind down a very little bit"
+        # 0.97 = 3% reduction in final speed to compensate for overshoot
+        SPEED_TUNE_FACTOR = 0.97 
+        
         # ✅ Reconstruct explicitly: U = U_at_z * (1 + delta)
         u_at_z_series = df['U_at_z'].to_numpy()
-        mag_U_final = u_at_z_series * (1.0 + flat)
+        mag_U_final = u_at_z_series * (1.0 + flat) * SPEED_TUNE_FACTOR
         
         df['mag_U'] = np.round(mag_U_final, ROUND)
         if 'U_ref' in df.columns:

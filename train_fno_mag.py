@@ -5,10 +5,10 @@ from fno2d_model import FNO2d, sensor_weighted_mse
 from gh_to_fno import build_input_tensor_from_gh
 
 
-DATA_FOLDER = "./train_csv"
+DATA_FOLDER = r"C:\LabShare\Dataset\FormFluxCases\Compressed\Training_Dataset"
 MODEL_OUT = "fno_mag_weights.pth"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-BATCH = 4; EPOCHS = 400; LR = 1e-3
+BATCH = 4; EPOCHS = 200; LR = 1e-3
 MODES1=32; MODES2=32; WIDTH=64; N_LAYERS=5
 FORCE_H = None; FORCE_W = None
 
@@ -39,7 +39,10 @@ if os.path.exists("../epochs"): # Check parent too if being run from subfolder
     try: shutil.rmtree("../epochs", ignore_errors=True)
     except: pass
 
-files = sorted(glob.glob(os.path.join(DATA_FOLDER,"*.csv")))
+files = sorted(
+    glob.glob(os.path.join(DATA_FOLDER, "**", "*.csv"), recursive=True)
+)
+
 if not files: raise RuntimeError("No training files in " + DATA_FOLDER)
 Xs=[]; Ys=[]; Masks=[]
 print("Preparing dataset from", len(files), "files...")
@@ -105,9 +108,9 @@ for fp in files:
         sensor_w = float(df['is_sensor'].iloc[i]) if 'is_sensor' in df.columns else 1.0
         sdf_val = max(float(df['SDF'].iloc[i]), 0.0)
         
-        # ✅ Physics weight: Stronger SDF-weighted loss
-        # alpha=9.0 gives 10x weight at the wall, decaying with distance L=5.0m
-        sdf_w = 1.0 + 9.0 * np.exp(-sdf_val / 5.0)
+        # ✅ Physics weight: Focal Sharpness
+        # alpha=19.0, L=5.0m (Narrow range focus + 20x surface weight)
+        sdf_w = 1.0 + 19.0 * np.exp(-sdf_val / 5.0)
             
         mask_grid[0, iy, ix] = sensor_w * valid_val * sdf_w
 
@@ -155,8 +158,8 @@ opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
 scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=200, gamma=0.5)
 
 # Early Stopping parameters
-EPOCHS = 200  # Increased max epochs
-PATIENCE = 50  # Stop if no improvement for 50 epochs
+EPOCHS = 200
+PATIENCE = 50 
 best_loss = float('inf')
 patience_counter = 0
 

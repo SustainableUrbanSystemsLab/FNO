@@ -67,11 +67,40 @@ class FNO2d(nn.Module):
         out = self.out_proj(x)
         return out
 
+def physics_loss(pred, target, mask=None, grad_weight=0.15):
+    """Combined MSE, Gradient Loss, and Acceleration Curb.
+    """
+    # 1. Main Weighted MSE
+    m = mask if mask is not None else torch.ones_like(pred)
+    
+    # Precision Fix: Acceleration Curb
+    # If the target is acceleration (>0) and we over-predict it, punish harder.
+    # This specifically stops high-wind areas from getting "too large".
+    diff = pred - target
+    penalty = torch.ones_like(diff)
+    # Target > 0 AND Pred > Target (Overshooting high wind)
+    high_wind_overshoot = (target > 0) & (diff > 0)
+    penalty[high_wind_overshoot] *= 2.0 
+    
+    mse = (diff**2 * penalty * m).sum() / (m.sum() + 1e-8)
+    
+    # 2. Gradient Sharpness (Sobel-like)
+    def get_grads(x):
+        dx = x[:, :, :, 1:] - x[:, :, :, :-1]
+        dy = x[:, :, 1:, :] - x[:, :, :-1, :]
+        return dx, dy
+    
+    p_dx, p_dy = get_grads(pred)
+    t_dx, t_dy = get_grads(target)
+    
+    # Mask gradients
+    m_dx = mask[:, :, :, 1:] if mask is not None else 1.0
+    m_dy = mask[:, :, 1:, :] if mask is not None else 1.0
+    
+    grad_loss = (((p_dx - t_dx)**2 * m_dx).mean() + ((p_dy - t_dy)**2 * m_dy).mean())
+    
+    return mse + grad_weight * grad_loss
+
 def sensor_weighted_mse(pred, target, sensor_mask=None):
-    """pred,target: (B,C,H,W). sensor_mask: (B,1,H,W) or None."""
-    if sensor_mask is None:
-        return F.mse_loss(pred, target)
-    mask = sensor_mask.repeat(1, pred.shape[1], 1, 1)
-    diff2 = (pred - target)**2 * mask
-    denom = mask.sum()
-    return diff2.sum() / (denom + 1e-8)
+    # Backward compatibility
+    return physics_loss(pred, target, sensor_mask)
