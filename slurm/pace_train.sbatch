@@ -34,8 +34,10 @@ uv sync
 
 # Execute training based on GPU count
 if [ "${NUM_GPUS:-1}" -gt 1 ]; then
-    echo "Starting DISTRIBUTED training with ${NUM_GPUS} GPUs..."
-    uv run torchrun --nproc_per_node=${NUM_GPUS} train_fno_distributed.py
+    # Use random port to avoid conflicts on shared nodes
+    MASTER_PORT=$((29500 + RANDOM % 1000))
+    echo "Starting DISTRIBUTED training with ${NUM_GPUS} GPUs on port ${MASTER_PORT}..."
+    uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_fno_distributed.py
 else
     echo "Starting SINGLE-GPU training..."
     uv run python train_fno_distributed.py
