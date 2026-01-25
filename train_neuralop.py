@@ -22,6 +22,8 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 import hashlib
+import pickle
+from multiprocessing import Pool, cpu_count
 
 # NeuralOperator imports
 from neuralop.models import FNO
@@ -63,6 +65,12 @@ N_LAYERS = config.get('model', {}).get('n_layers', 5)
 
 # Loss weights
 GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.3)
+
+# Cache settings
+CACHE_FILE = "dataset_cache_neuralop.pkl"
+NUM_WORKERS = config.get('performance', {}).get('num_workers', 0)
+if NUM_WORKERS == 0:
+    NUM_WORKERS = max(1, cpu_count() - 2)
 
 # ============ Distributed Setup ============
 def setup_distributed():
@@ -165,6 +173,70 @@ def load_single_csv(fp):
         return None, f"Error processing {fp}: {e}"
 
 
+def get_cache_hash(files):
+    """Generate a hash based on file count and sample of modification times."""
+    folders = set(os.path.dirname(f) for f in files)
+    hash_parts = [
+        f"files:{len(files)}",
+        f"folders:{len(folders)}",
+        "neuralop_v2",  # Include version to invalidate old caches
+    ]
+    for f in files[::10]:  # Sample every 10th file for speed
+        hash_parts.append(f"{os.path.basename(f)}_{os.path.getmtime(f):.0f}")
+    hash_input = "|".join(hash_parts)
+    return hashlib.md5(hash_input.encode()).hexdigest()
+
+
+def load_or_prepare_dataset(files, rank, is_main):
+    """Load from cache or prepare dataset with multiprocessing."""
+    cache_hash = get_cache_hash(files)
+    cache_path = f"{CACHE_FILE}.{cache_hash}"
+    
+    # Try to load from cache
+    if os.path.exists(cache_path):
+        if is_main:
+            print(f"Loading cached dataset from {cache_path}...")
+        with open(cache_path, 'rb') as f:
+            return pickle.load(f)
+    
+    # Prepare dataset with multiprocessing
+    if is_main:
+        print(f"Preparing dataset from {len(files)} files using {NUM_WORKERS} workers...")
+    
+    with Pool(NUM_WORKERS) as pool:
+        if is_main:
+            results = list(tqdm(pool.imap(load_single_csv, files), total=len(files), desc="Data Preparation"))
+        else:
+            results = list(pool.imap(load_single_csv, files))
+    
+    Xs, Ys, Masks = [], [], []
+    chs = None
+    errors = []
+    for result, error in results:
+        if error:
+            errors.append(error)
+            continue
+        X, Y, M, c = result
+        Xs.append(X)
+        Ys.append(Y)
+        Masks.append(M)
+        if chs is None:
+            chs = c
+    
+    if is_main:
+        print(f"Loaded {len(Xs)} samples, {len(errors)} errors")
+        if errors[:3]:
+            for e in errors[:3]:
+                print(f"  Warning: {e}")
+    
+    # Save to cache (only on main process)
+    if is_main:
+        print(f"Saving cache to {cache_path}...")
+        with open(cache_path, 'wb') as f:
+            pickle.dump((Xs, Ys, Masks, chs), f)
+    
+    return Xs, Ys, Masks, chs
+
 class CSVDataset(Dataset):
     def __init__(self, data_list):
         self.data = data_list
@@ -190,31 +262,20 @@ def main():
     
     # Load data
     data_folder = get_data_folder()
-    csv_files = glob.glob(os.path.join(data_folder, '**/*.csv'), recursive=True)
+    csv_files = sorted(glob.glob(os.path.join(data_folder, '**/*.csv'), recursive=True))
     
     if is_main_process(rank):
         print(f"Found {len(csv_files)} CSV files in {data_folder}")
     
-    # Process CSV files
-    data_list = []
-    errors = []
+    # Load with caching and multiprocessing
+    Xs, Ys, Masks, chs = load_or_prepare_dataset(csv_files, rank, is_main_process(rank))
     
-    for fp in tqdm(csv_files, desc="Loading CSVs", disable=not is_main_process(rank)):
-        result, error = load_single_csv(fp)
-        if result is not None:
-            data_list.append(result)
-        elif error:
-            errors.append(error)
-    
-    if is_main_process(rank):
-        print(f"Loaded {len(data_list)} samples, {len(errors)} errors")
-        if errors[:3]:
-            for e in errors[:3]:
-                print(f"  Error: {e}")
-    
-    if len(data_list) == 0:
+    if len(Xs) == 0:
         print("No data loaded! Exiting.")
         return
+    
+    # Create data list in expected format
+    data_list = list(zip(Xs, Ys, Masks, [chs] * len(Xs)))
     
     # Create dataset and dataloader
     dataset = CSVDataset(data_list)
@@ -226,7 +287,8 @@ def main():
         loader = DataLoader(dataset, batch_size=BATCH, shuffle=True, num_workers=0, pin_memory=True)
     
     # Get input shape from first sample
-    sample_x, sample_y, _ = data_list[0][:3]
+    sample_x = Xs[0]
+    sample_y = Ys[0]
     in_channels = sample_x.shape[0]
     
     if is_main_process(rank):
