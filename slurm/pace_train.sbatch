@@ -42,10 +42,10 @@ if [ "${NUM_GPUS:-1}" -gt 1 ]; then
     export NCCL_IB_DISABLE=0            # Enable InfiniBand if available
     
     echo "Starting DISTRIBUTED training with ${NUM_GPUS} GPUs on port ${MASTER_PORT}..."
-    uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_fno_distributed.py
+    uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_neuralop.py
 else
     echo "Starting SINGLE-GPU training..."
-    uv run python train_fno_distributed.py
+    uv run python train_neuralop.py
 fi
 
 echo "Job finished on $(date)"
