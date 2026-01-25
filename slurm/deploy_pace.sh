@@ -19,16 +19,23 @@ done
 # Convert to lowercase for matching
 GPU_TYPE_LOWER=$(echo "$GPU_TYPE" | tr '[:upper:]' '[:lower:]')
 
+# Map to correct PACE gres names (case-sensitive!)
 case $GPU_TYPE_LOWER in
     h200)
-        SLURM_GPU="h200:${NUM_GPUS}"
+        SLURM_GPU="H200:${NUM_GPUS}"
         ;;
     rtx6000)
-        SLURM_GPU="rtx6000:${NUM_GPUS}"
+        SLURM_GPU="RTX6000:${NUM_GPUS}"
+        ;;
+    a100)
+        SLURM_GPU="A100:${NUM_GPUS}"
+        ;;
+    v100)
+        SLURM_GPU="V100:${NUM_GPUS}"
         ;;
     *)
         echo "Error: Unsupported GPU type '$GPU_TYPE'."
-        echo "Supported types: H200, RTX6000"
+        echo "Supported types: H200, RTX6000, A100, V100"
         exit 1
         ;;
 esac
