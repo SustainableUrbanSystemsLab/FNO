@@ -1,0 +1,1 @@
+uv run train_fno_distributed.py
