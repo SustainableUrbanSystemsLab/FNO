@@ -11,8 +11,10 @@ dependencies = [
     "tqdm",
 ]
 
+[dependency-groups]
+dev = []
+
 [tool.uv]
-dev-dependencies = []
 
 [[tool.uv.index]]
 name = "pytorch"
