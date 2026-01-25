@@ -14,9 +14,9 @@ model_output = "fno_mag_weights.pth"
 
 [training]
 batch_size = 4
-epochs = 200
-learning_rate = 0.001
-patience = 50  # Early stopping patience
+epochs = 500            # Increased from 200 for better convergence
+learning_rate = 0.0005  # Reduced from 0.001 for more stable training
+patience = 75           # Increased from 50 to allow more exploration
 
 [model]
 modes1 = 48  # Increased from 32 for sharper predictions
@@ -26,8 +26,8 @@ n_layers = 5
 
 [loss]
 # Loss function weights (MSE is always 1.0)
-gradient_weight = 0.25  # Increased to compensate for no spectral loss
-spectral_weight = 0.0   # Disabled for multi-GPU stability (FFT causes sync issues)
+gradient_weight = 0.30  # Increased for sharper building edges
+spectral_weight = 0.0   # Disabled for multi-GPU stability
 
 [performance]
 # Number of parallel workers for data loading (0 = auto-detect)

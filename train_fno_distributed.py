@@ -299,7 +299,7 @@ def main():
         print("=" * 50)
     
     opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=50, gamma=0.5)  # LR decay every 50 epochs
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)  # Smooth LR decay
 
     if is_main_process(rank):
         print("STARTING TRAINING...")

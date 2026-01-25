@@ -115,14 +115,13 @@ for CSV in tqdm(files, desc="Batch Inference"):
         # ✅ Quick sanity test
         print(f"  Pred delta_u stats: min={flat.min():.3f}, mean={flat.mean():.3f}, max={flat.max():.3f}")
 
-        # ✅ Wind Tuning Knob: "tune the wind down a very little bit"
-        # 0.97 = 3% reduction in final speed to compensate for overshoot
-        SPEED_TUNE_FACTOR = 0.97 
-        
-        # ✅ Reconstruct explicitly: U = U_over_Uref * (1 + delta)
+        # ✅ Reconstruct: mag_U = U_over_Uref * (1 + delta)
+        # (Removed SPEED_TUNE_FACTOR - it was causing offset issues)
         u_over_uref_series = df['U_over_Uref'].to_numpy()
-        mag_U_final = u_over_uref_series * (1.0 + flat) * SPEED_TUNE_FACTOR
+        mag_U_final = u_over_uref_series * (1.0 + flat)
         
+        # Save both for debugging
+        df['delta_pred'] = np.round(flat, 4)  # Raw model output (for debugging)
         df['mag_U'] = np.round(mag_U_final, ROUND)
         if 'U_ref' in df.columns:
             Uref = float(df['U_ref'].iloc[0])
