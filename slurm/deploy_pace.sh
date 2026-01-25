@@ -33,19 +33,42 @@ case $GPU_TYPE_LOWER in
         ;;
 esac
 
+# Read PACE config from config.toml
+CONFIG_FILE="config.toml"
+if [ -f "$CONFIG_FILE" ]; then
+    PACE_ACCOUNT=$(grep -E "^account\s*=" "$CONFIG_FILE" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
+    PACE_PARTITION=$(grep -E "^partition\s*=" "$CONFIG_FILE" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
+else
+    echo "Warning: $CONFIG_FILE not found. Set account in config.toml."
+    PACE_ACCOUNT=""
+    PACE_PARTITION=""
+fi
+
+# Validate account
+if [ -z "$PACE_ACCOUNT" ]; then
+    echo "Error: PACE account not set in config.toml"
+    echo "Edit config.toml and set: account = \"gts-yourusername\""
+    exit 1
+fi
+
 echo "=========================================="
 echo " Preparing PACE Deployment"
 echo " GPU Requested: $GPU_TYPE x $NUM_GPUS ($SLURM_GPU)"
+echo " Account: $PACE_ACCOUNT"
 echo "=========================================="
 
 # Create logs directory locally to avoid sbatch errors
 mkdir -p logs
 
+# Build sbatch command
+SBATCH_CMD="sbatch --gres=gpu:$SLURM_GPU --account=$PACE_ACCOUNT --export=NUM_GPUS=$NUM_GPUS"
+if [ -n "$PACE_PARTITION" ]; then
+    SBATCH_CMD="$SBATCH_CMD --partition=$PACE_PARTITION"
+fi
+SBATCH_CMD="$SBATCH_CMD slurm/pace_train.sbatch"
+
 # Submit the job
-# We pass the gres directly here. 
-# You might need to add --account=YOUR_ACCOUNT or --partition=YOUR_PARTITION 
-# if PACE requires them for your specific allocation.
-sbatch --gres=gpu:$SLURM_GPU --export=NUM_GPUS=$NUM_GPUS slurm/pace_train.sbatch
+$SBATCH_CMD
 
 echo "------------------------------------------"
 echo "Job submitted. Check status with: squeue -u $USER"

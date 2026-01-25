@@ -26,3 +26,8 @@ n_layers = 5
 [performance]
 # Number of parallel workers for data loading (0 = auto-detect)
 num_workers = 0
+
+[pace]
+# PACE cluster configuration (required for job submission)
+account = ""  # e.g., "gts-ikaradag3" - REQUIRED
+partition = ""  # e.g., "phoenix" (leave empty for default)
