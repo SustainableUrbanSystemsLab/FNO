@@ -21,7 +21,7 @@ EPOCHS = 200
 LR = 1e-3
 MODES1 = 32; MODES2 = 32; WIDTH = 64; N_LAYERS = 5
 FORCE_H = None; FORCE_W = None
-NUM_WORKERS = cpu_count()  # Use all available cores for data loading
+NUM_WORKERS = max(1, cpu_count() // 2)  # Use half of available cores for data loading
 
 # ============ Distributed Setup ============
 def setup_distributed():
