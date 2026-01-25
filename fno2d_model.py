@@ -97,7 +97,7 @@ def spectral_loss(pred, target, mask=None):
     return F.mse_loss(pred_log, target_log)
 
 
-def physics_loss(pred, target, mask=None, grad_weight=0.15, spectral_weight=0.05):
+def physics_loss(pred, target, mask=None, grad_weight=0.15, spectral_weight=0.05, return_components=False):
     """Combined MSE, Gradient Loss, Spectral Loss, and Acceleration Curb.
     
     Args:
@@ -106,6 +106,11 @@ def physics_loss(pred, target, mask=None, grad_weight=0.15, spectral_weight=0.05
         mask: Optional weight mask (B, C, H, W)
         grad_weight: Weight for gradient loss (default 0.15)
         spectral_weight: Weight for spectral/FFT loss (default 0.05)
+        return_components: If True, return dict with individual loss components
+    
+    Returns:
+        If return_components=False: total_loss (tensor)
+        If return_components=True: (total_loss, components_dict)
     """
     # 1. Main Weighted MSE
     m = mask if mask is not None else torch.ones_like(pred)
@@ -137,11 +142,22 @@ def physics_loss(pred, target, mask=None, grad_weight=0.15, spectral_weight=0.05
     grad_loss = (((p_dx - t_dx)**2 * m_dx).mean() + ((p_dy - t_dy)**2 * m_dy).mean())
     
     # 3. Spectral Loss (preserve high-frequency features)
-    spec_loss = spectral_loss(pred, target, mask) if spectral_weight > 0 else 0.0
+    spec_loss = spectral_loss(pred, target, mask) if spectral_weight > 0 else torch.tensor(0.0, device=pred.device)
     
-    return mse + grad_weight * grad_loss + spectral_weight * spec_loss
+    total_loss = mse + grad_weight * grad_loss + spectral_weight * spec_loss
+    
+    if return_components:
+        components = {
+            'mse_loss': float(mse.item()),
+            'gradient_loss': float(grad_loss.item()),
+            'spectral_loss': float(spec_loss.item()) if isinstance(spec_loss, torch.Tensor) else 0.0,
+        }
+        return total_loss, components
+    
+    return total_loss
 
 
-def sensor_weighted_mse(pred, target, sensor_mask=None, grad_weight=0.15, spectral_weight=0.05):
+def sensor_weighted_mse(pred, target, sensor_mask=None, grad_weight=0.15, spectral_weight=0.05, return_components=False):
     """Backward compatible wrapper with configurable loss weights."""
-    return physics_loss(pred, target, sensor_mask, grad_weight, spectral_weight)
+    return physics_loss(pred, target, sensor_mask, grad_weight, spectral_weight, return_components)
+

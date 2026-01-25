@@ -299,7 +299,7 @@ def main():
         print("=" * 50)
     
     opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=200, gamma=0.5)
+    scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=50, gamma=0.5)  # LR decay every 50 epochs
 
     if is_main_process(rank):
         print("STARTING TRAINING...")
@@ -339,22 +339,34 @@ def main():
         running = 0.0
         
         pbar = tqdm(loader, desc=f"Epoch {epoch}/{EPOCHS}", leave=False) if is_main_process(rank) else loader
+        
+        # Accumulators for loss components
+        running_mse = 0.0
+        running_grad = 0.0
+        running_spec = 0.0
+        
         for xb, yb, mb in pbar:
             xb = xb.float().to(device)
             yb = yb.float().to(device)
             mb = mb.float().to(device)
             
             pred = model(xb)
-            loss = sensor_weighted_mse(pred, yb, sensor_mask=mb, grad_weight=GRAD_WEIGHT, spectral_weight=SPECTRAL_WEIGHT)
+            loss, components = sensor_weighted_mse(pred, yb, sensor_mask=mb, grad_weight=GRAD_WEIGHT, spectral_weight=SPECTRAL_WEIGHT, return_components=True)
             opt.zero_grad()
             loss.backward()
             opt.step()
-            running += float(loss.item()) * xb.shape[0]
+            
+            batch_size = xb.shape[0]
+            running += float(loss.item()) * batch_size
+            running_mse += components['mse_loss'] * batch_size
+            running_grad += components['gradient_loss'] * batch_size
+            running_spec += components['spectral_loss'] * batch_size
             
             if is_main_process(rank) and hasattr(pbar, 'set_postfix'):
                 pbar.set_postfix({"loss": f"{loss.item():.4e}"})
         
         scheduler.step()
+        n_samples = len(dataset)
         
         # Aggregate loss across GPUs
         if is_distributed:
@@ -366,7 +378,10 @@ def main():
             dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
             running = running_tensor.item()
         
-        avg_loss = running / len(dataset)
+        avg_loss = running / n_samples
+        avg_mse = running_mse / n_samples
+        avg_grad = running_grad / n_samples
+        avg_spec = running_spec / n_samples
         
         if is_main_process(rank):
             print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e}")
@@ -398,9 +413,11 @@ def main():
             
             # Log epoch metrics for publication
             if logger:
-                import time
                 logger.log_epoch(epoch, {
                     'total_loss': avg_loss,
+                    'mse_loss': avg_mse,
+                    'gradient_loss': avg_grad,
+                    'spectral_loss': avg_spec,
                     'learning_rate': scheduler.get_last_lr()[0],
                     'best_loss': best_loss,
                     'patience': patience_counter,
