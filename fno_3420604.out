@@ -1,0 +1,272 @@
+---------------------------------------
+Begin Slurm Prolog: Jan-25-2026 03:01:14
+Job ID:    3420604
+User ID:   ikaradag3
+Account:   gts-pkastner3
+Job name:  fno_train
+Partition: gpu-h200
+QOS:       inferno
+---------------------------------------
+Job started on Sun Jan 25 03:01:14 EST 2026
+Running on node atl1-1-01-009-16-0.pace.gatech.edu
+Number of GPUs: 2
+Syncing dependencies with uv...
+Starting DISTRIBUTED training with 2 GPUs on port 29569...
+Training with 2 GPU(s)
+Distributed: True
+Preparing dataset from 2000 files using 32 workers...
+Saving cache to dataset_cache.pkl.70358a273d07f9fb3782e24dd89c1380...
+Max grid size: 504x504. Padding...
+==================================================
+DATASET PREPARATION COMPLETE
+==================================================
+  Total samples: 2000
+  Input shape:   torch.Size([2000, 8, 504, 504]) (N, C, H, W)
+  Target shape:  torch.Size([2000, 1, 504, 504])
+  Mask shape:    torch.Size([2000, 1, 504, 504])
+  Input channels: ['SDF', 'Bldg_height', 'Z_relative', 'U_at_z', 'X_local', 'Y_local', 'dir_sin', 'dir_cos']
+==================================================
+CREATING MODEL...
+  FNO2d: modes=(32,32), width=64, layers=5
+  Total parameters: 42,136,705
+==================================================
+STARTING TRAINING...
+  Epochs: 200, Batch size: 4, LR: 0.001
+  Patience: 50, Device: cuda:0
+==================================================
+Epoch 1/200 loss 1.197498e+00
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 2/200 loss 1.325671e-01
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 3/200 loss 1.163532e-01
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 4/200 loss 1.077255e-01
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 5/200 loss 1.027816e-01
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 6/200 loss 9.958121e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 7/200 loss 9.717097e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 8/200 loss 9.527873e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 9/200 loss 9.371257e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 10/200 loss 9.234179e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 11/200 loss 9.116151e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 12/200 loss 9.010857e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 13/200 loss 8.914517e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 14/200 loss 8.827365e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 15/200 loss 8.744415e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 16/200 loss 8.664693e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 17/200 loss 8.589868e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 18/200 loss 8.520833e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 19/200 loss 8.457799e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 20/200 loss 8.400546e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 21/200 loss 8.346796e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 22/200 loss 8.294994e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 23/200 loss 8.244717e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 24/200 loss 8.196053e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 25/200 loss 8.145684e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 26/200 loss 8.093269e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 27/200 loss 8.042282e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 28/200 loss 7.993562e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 29/200 loss 7.950302e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 30/200 loss 7.909140e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 31/200 loss 7.869651e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 32/200 loss 7.830562e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 33/200 loss 7.790625e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 34/200 loss 7.749694e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 35/200 loss 7.707622e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 36/200 loss 7.662494e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 37/200 loss 7.613522e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 38/200 loss 7.562821e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 39/200 loss 7.517523e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 40/200 loss 7.476398e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 41/200 loss 7.437553e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 42/200 loss 7.401326e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 43/200 loss 7.365985e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 44/200 loss 7.330763e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 45/200 loss 7.292614e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 46/200 loss 7.254990e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 47/200 loss 7.219127e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 48/200 loss 7.186069e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 49/200 loss 7.158695e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 50/200 loss 7.130704e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 51/200 loss 7.102413e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 52/200 loss 7.072182e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 53/200 loss 7.043956e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 54/200 loss 7.019461e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 55/200 loss 6.997327e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 56/200 loss 6.970236e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 57/200 loss 6.948351e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 58/200 loss 6.920354e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 59/200 loss 6.890762e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 60/200 loss 6.871536e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 61/200 loss 6.848868e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 62/200 loss 6.829620e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 63/200 loss 6.809473e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 64/200 loss 6.785936e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 65/200 loss 6.766467e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 66/200 loss 6.749768e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 67/200 loss 6.733603e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 68/200 loss 6.720633e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 69/200 loss 6.709173e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 70/200 loss 6.696117e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 71/200 loss 6.685833e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 72/200 loss 6.670293e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 73/200 loss 6.653917e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 74/200 loss 6.640269e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 75/200 loss 6.629750e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 76/200 loss 6.616591e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 77/200 loss 6.600735e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 78/200 loss 6.586852e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 79/200 loss 6.575675e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 80/200 loss 6.563104e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 81/200 loss 6.553955e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 82/200 loss 6.543511e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 83/200 loss 6.532362e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 84/200 loss 6.520673e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 85/200 loss 6.506068e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 86/200 loss 6.495099e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 87/200 loss 6.486669e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 88/200 loss 6.485001e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 89/200 loss 6.477942e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 90/200 loss 6.464543e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 91/200 loss 6.449310e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 92/200 loss 6.438615e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 93/200 loss 6.430087e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 94/200 loss 6.419461e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 95/200 loss 6.414350e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 96/200 loss 6.413893e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 97/200 loss 6.410283e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 98/200 loss 6.402617e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 99/200 loss 6.395306e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 100/200 loss 6.386791e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 101/200 loss 6.377467e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 102/200 loss 6.366286e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 103/200 loss 6.358117e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 104/200 loss 6.352909e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 105/200 loss 6.346495e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 106/200 loss 6.339740e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 107/200 loss 6.332375e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 108/200 loss 6.325237e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 109/200 loss 6.319719e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 110/200 loss 6.314354e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 111/200 loss 6.309301e-02
+  > New best loss! Saved fno_mag_weights.pth
+Epoch 112/200 loss 6.301846e-02
+  > New best loss! Saved fno_mag_weights.pth
+---------------------------------------
+Begin Slurm Epilog: Jan-25-2026 05:01:14
+Job ID:        3420604
+User ID:       ikaradag3
+Account:       gts-pkastner3
+Job name:      fno_train
+Resources:     cpu=12,gres/gpu:h200=2,mem=128G,node=1
+Rsrc Used:     cput=1-00:00:24,vmem=0,walltime=02:00:02,mem=102548432K,energy_used=0
+Partition:     gpu-h200
+QOS:           inferno
+Nodes:         atl1-1-01-009-16-0
+---------------------------------------

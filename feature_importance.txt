@@ -1,0 +1,3300 @@
+
+Epoch 10 Importance
+------------------------------
+Bldg_height    : 32.83%
+X_coords       : 23.10%
+Y_coords       : 21.42%
+SDF            : 21.13%
+Z_relative     : 0.44%
+dir_sin        : 0.37%
+dir_cos        : 0.36%
+U_at_z         : 0.35%
+
+Epoch 20 Importance
+------------------------------
+Bldg_height    : 35.68%
+X_coords       : 22.50%
+Y_coords       : 20.97%
+SDF            : 20.85%
+Z_relative     : 0.00%
+U_at_z         : 0.00%
+dir_cos        : 0.00%
+dir_sin        : 0.00%
+
+Epoch 10 Importance
+------------------------------
+Bldg_height    : 20.30%
+Y_local        : 12.14%
+SDF            : 11.66%
+U_at_z         : 11.54%
+Z_relative     : 11.44%
+dir_cos        : 11.29%
+dir_sin        : 10.92%
+X_local        : 10.72%
+
+Epoch 20 Importance
+------------------------------
+Bldg_height    : 26.05%
+Y_local        : 11.26%
+SDF            : 10.85%
+U_at_z         : 10.70%
+Z_relative     : 10.63%
+dir_cos        : 10.46%
+dir_sin        : 10.11%
+X_local        : 9.93%
+
+Epoch 30 Importance
+------------------------------
+Bldg_height    : 28.56%
+Y_local        : 10.88%
+SDF            : 10.52%
+U_at_z         : 10.34%
+Z_relative     : 10.28%
+dir_cos        : 10.10%
+dir_sin        : 9.75%
+X_local        : 9.58%
+
+Epoch 40 Importance
+------------------------------
+Bldg_height    : 30.24%
+Y_local        : 10.61%
+SDF            : 10.30%
+U_at_z         : 10.08%
+Z_relative     : 10.04%
+dir_cos        : 9.86%
+dir_sin        : 9.52%
+X_local        : 9.34%
+
+Epoch 50 Importance
+------------------------------
+Bldg_height    : 31.69%
+Y_local        : 10.38%
+SDF            : 10.12%
+U_at_z         : 9.86%
+Z_relative     : 9.84%
+dir_cos        : 9.66%
+dir_sin        : 9.33%
+X_local        : 9.13%
+
+Epoch 60 Importance
+------------------------------
+Bldg_height    : 33.13%
+Y_local        : 10.15%
+SDF            : 9.94%
+Z_relative     : 9.65%
+U_at_z         : 9.63%
+dir_cos        : 9.46%
+dir_sin        : 9.13%
+X_local        : 8.91%
+
+Epoch 70 Importance
+------------------------------
+Bldg_height    : 34.35%
+Y_local        : 9.95%
+SDF            : 9.80%
+Z_relative     : 9.48%
+U_at_z         : 9.42%
+dir_cos        : 9.30%
+dir_sin        : 8.97%
+X_local        : 8.74%
+
+Epoch 80 Importance
+------------------------------
+Bldg_height    : 34.56%
+Y_local        : 9.89%
+SDF            : 9.83%
+Z_relative     : 9.45%
+U_at_z         : 9.34%
+dir_cos        : 9.28%
+dir_sin        : 8.96%
+X_local        : 8.69%
+
+Epoch 90 Importance
+------------------------------
+Bldg_height    : 34.23%
+SDF            : 9.99%
+Y_local        : 9.90%
+Z_relative     : 9.49%
+dir_cos        : 9.34%
+U_at_z         : 9.32%
+dir_sin        : 9.02%
+X_local        : 8.72%
+
+Epoch 100 Importance
+------------------------------
+Bldg_height    : 33.80%
+SDF            : 10.22%
+Y_local        : 9.92%
+Z_relative     : 9.53%
+dir_cos        : 9.40%
+U_at_z         : 9.28%
+dir_sin        : 9.10%
+X_local        : 8.74%
+
+Epoch 110 Importance
+------------------------------
+Bldg_height    : 33.40%
+SDF            : 10.50%
+Y_local        : 9.92%
+Z_relative     : 9.57%
+dir_cos        : 9.45%
+U_at_z         : 9.22%
+dir_sin        : 9.18%
+X_local        : 8.75%
+
+Epoch 120 Importance
+------------------------------
+Bldg_height    : 32.99%
+SDF            : 10.81%
+Y_local        : 9.91%
+Z_relative     : 9.62%
+dir_cos        : 9.51%
+dir_sin        : 9.26%
+U_at_z         : 9.15%
+X_local        : 8.75%
+
+Epoch 130 Importance
+------------------------------
+Bldg_height    : 32.62%
+SDF            : 11.14%
+Y_local        : 9.88%
+Z_relative     : 9.67%
+dir_cos        : 9.56%
+dir_sin        : 9.32%
+U_at_z         : 9.07%
+X_local        : 8.75%
+
+Epoch 140 Importance
+------------------------------
+Bldg_height    : 32.23%
+SDF            : 11.51%
+Y_local        : 9.82%
+Z_relative     : 9.72%
+dir_cos        : 9.62%
+dir_sin        : 9.37%
+U_at_z         : 8.97%
+X_local        : 8.76%
+
+Epoch 150 Importance
+------------------------------
+Bldg_height    : 31.89%
+SDF            : 11.88%
+Z_relative     : 9.78%
+Y_local        : 9.74%
+dir_cos        : 9.67%
+dir_sin        : 9.41%
+U_at_z         : 8.87%
+X_local        : 8.76%
+
+Epoch 160 Importance
+------------------------------
+Bldg_height    : 31.77%
+SDF            : 12.23%
+Z_relative     : 9.82%
+dir_cos        : 9.72%
+Y_local        : 9.62%
+dir_sin        : 9.38%
+U_at_z         : 8.73%
+X_local        : 8.72%
+
+Epoch 170 Importance
+------------------------------
+Bldg_height    : 31.70%
+SDF            : 12.59%
+Z_relative     : 9.87%
+dir_cos        : 9.73%
+Y_local        : 9.51%
+dir_sin        : 9.34%
+X_local        : 8.68%
+U_at_z         : 8.57%
+
+Epoch 180 Importance
+------------------------------
+Bldg_height    : 31.66%
+SDF            : 12.98%
+Z_relative     : 9.93%
+dir_cos        : 9.74%
+Y_local        : 9.36%
+dir_sin        : 9.31%
+X_local        : 8.60%
+U_at_z         : 8.41%
+
+Epoch 190 Importance
+------------------------------
+Bldg_height    : 31.80%
+SDF            : 13.32%
+Z_relative     : 9.97%
+dir_cos        : 9.73%
+dir_sin        : 9.25%
+Y_local        : 9.20%
+X_local        : 8.52%
+U_at_z         : 8.23%
+
+Epoch 200 Importance
+------------------------------
+Bldg_height    : 31.93%
+SDF            : 13.67%
+Z_relative     : 10.02%
+dir_cos        : 9.72%
+dir_sin        : 9.15%
+Y_local        : 9.03%
+X_local        : 8.42%
+U_at_z         : 8.05%
+
+Epoch 210 Importance
+------------------------------
+Bldg_height    : 32.34%
+SDF            : 13.78%
+Z_relative     : 9.97%
+dir_cos        : 9.71%
+dir_sin        : 9.15%
+Y_local        : 8.86%
+X_local        : 8.29%
+U_at_z         : 7.89%
+
+Epoch 220 Importance
+------------------------------
+Bldg_height    : 32.63%
+SDF            : 13.92%
+Z_relative     : 9.95%
+dir_cos        : 9.71%
+dir_sin        : 9.15%
+Y_local        : 8.71%
+X_local        : 8.16%
+U_at_z         : 7.75%
+
+Epoch 230 Importance
+------------------------------
+Bldg_height    : 32.80%
+SDF            : 14.09%
+Z_relative     : 9.97%
+dir_cos        : 9.70%
+dir_sin        : 9.15%
+Y_local        : 8.59%
+X_local        : 8.06%
+U_at_z         : 7.65%
+
+Epoch 240 Importance
+------------------------------
+Bldg_height    : 32.96%
+SDF            : 14.24%
+Z_relative     : 9.97%
+dir_cos        : 9.71%
+dir_sin        : 9.17%
+Y_local        : 8.46%
+X_local        : 7.94%
+U_at_z         : 7.54%
+
+Epoch 250 Importance
+------------------------------
+Bldg_height    : 33.10%
+SDF            : 14.39%
+Z_relative     : 10.00%
+dir_cos        : 9.68%
+dir_sin        : 9.14%
+Y_local        : 8.37%
+X_local        : 7.85%
+U_at_z         : 7.46%
+
+Epoch 260 Importance
+------------------------------
+Bldg_height    : 33.34%
+SDF            : 14.49%
+Z_relative     : 10.00%
+dir_cos        : 9.69%
+dir_sin        : 9.12%
+Y_local        : 8.25%
+X_local        : 7.74%
+U_at_z         : 7.37%
+
+Epoch 270 Importance
+------------------------------
+Bldg_height    : 33.50%
+SDF            : 14.60%
+Z_relative     : 10.01%
+dir_cos        : 9.68%
+dir_sin        : 9.11%
+Y_local        : 8.14%
+X_local        : 7.67%
+U_at_z         : 7.29%
+
+Epoch 280 Importance
+------------------------------
+Bldg_height    : 33.61%
+SDF            : 14.72%
+Z_relative     : 10.03%
+dir_cos        : 9.69%
+dir_sin        : 9.11%
+Y_local        : 8.02%
+X_local        : 7.59%
+U_at_z         : 7.22%
+
+Epoch 290 Importance
+------------------------------
+Bldg_height    : 33.73%
+SDF            : 14.83%
+Z_relative     : 10.06%
+dir_cos        : 9.70%
+dir_sin        : 9.11%
+Y_local        : 7.91%
+X_local        : 7.51%
+U_at_z         : 7.15%
+
+Epoch 300 Importance
+------------------------------
+Bldg_height    : 33.89%
+SDF            : 14.92%
+Z_relative     : 10.08%
+dir_cos        : 9.70%
+dir_sin        : 9.10%
+Y_local        : 7.79%
+X_local        : 7.41%
+U_at_z         : 7.10%
+
+Epoch 310 Importance
+------------------------------
+Bldg_height    : 34.03%
+SDF            : 15.05%
+Z_relative     : 10.11%
+dir_cos        : 9.68%
+dir_sin        : 9.06%
+Y_local        : 7.69%
+X_local        : 7.33%
+U_at_z         : 7.05%
+
+Epoch 320 Importance
+------------------------------
+Bldg_height    : 34.14%
+SDF            : 15.16%
+Z_relative     : 10.13%
+dir_cos        : 9.64%
+dir_sin        : 9.01%
+Y_local        : 7.61%
+X_local        : 7.31%
+U_at_z         : 7.00%
+
+Epoch 330 Importance
+------------------------------
+Bldg_height    : 34.21%
+SDF            : 15.25%
+Z_relative     : 10.15%
+dir_cos        : 9.65%
+dir_sin        : 9.04%
+Y_local        : 7.51%
+X_local        : 7.23%
+U_at_z         : 6.97%
+
+Epoch 340 Importance
+------------------------------
+Bldg_height    : 34.29%
+SDF            : 15.34%
+Z_relative     : 10.17%
+dir_cos        : 9.64%
+dir_sin        : 9.06%
+Y_local        : 7.40%
+X_local        : 7.16%
+U_at_z         : 6.93%
+
+Epoch 350 Importance
+------------------------------
+Bldg_height    : 34.35%
+SDF            : 15.43%
+Z_relative     : 10.20%
+dir_cos        : 9.64%
+dir_sin        : 9.07%
+Y_local        : 7.31%
+X_local        : 7.09%
+U_at_z         : 6.90%
+
+Epoch 360 Importance
+------------------------------
+Bldg_height    : 34.43%
+SDF            : 15.51%
+Z_relative     : 10.22%
+dir_cos        : 9.64%
+dir_sin        : 9.08%
+Y_local        : 7.22%
+X_local        : 7.03%
+U_at_z         : 6.87%
+
+Epoch 370 Importance
+------------------------------
+Bldg_height    : 34.48%
+SDF            : 15.61%
+Z_relative     : 10.24%
+dir_cos        : 9.66%
+dir_sin        : 9.10%
+Y_local        : 7.12%
+X_local        : 6.94%
+U_at_z         : 6.84%
+
+Epoch 380 Importance
+------------------------------
+Bldg_height    : 34.59%
+SDF            : 15.67%
+Z_relative     : 10.26%
+dir_cos        : 9.65%
+dir_sin        : 9.10%
+Y_local        : 7.03%
+X_local        : 6.88%
+U_at_z         : 6.82%
+
+Epoch 390 Importance
+------------------------------
+Bldg_height    : 34.70%
+SDF            : 15.75%
+Z_relative     : 10.27%
+dir_cos        : 9.65%
+dir_sin        : 9.08%
+Y_local        : 6.94%
+X_local        : 6.82%
+U_at_z         : 6.80%
+
+Epoch 400 Importance
+------------------------------
+Bldg_height    : 34.75%
+SDF            : 15.82%
+Z_relative     : 10.29%
+dir_cos        : 9.64%
+dir_sin        : 9.08%
+Y_local        : 6.86%
+U_at_z         : 6.79%
+X_local        : 6.77%
+
+Epoch 410 Importance
+------------------------------
+Bldg_height    : 34.92%
+SDF            : 15.82%
+Z_relative     : 10.27%
+dir_cos        : 9.63%
+dir_sin        : 9.06%
+Y_local        : 6.80%
+U_at_z         : 6.77%
+X_local        : 6.72%
+
+Epoch 420 Importance
+------------------------------
+Bldg_height    : 35.03%
+SDF            : 15.81%
+Z_relative     : 10.27%
+dir_cos        : 9.63%
+dir_sin        : 9.08%
+U_at_z         : 6.77%
+Y_local        : 6.74%
+X_local        : 6.67%
+
+Epoch 430 Importance
+------------------------------
+Bldg_height    : 35.13%
+SDF            : 15.81%
+Z_relative     : 10.27%
+dir_cos        : 9.64%
+dir_sin        : 9.10%
+U_at_z         : 6.76%
+Y_local        : 6.67%
+X_local        : 6.61%
+
+Epoch 440 Importance
+------------------------------
+Bldg_height    : 35.20%
+SDF            : 15.82%
+Z_relative     : 10.28%
+dir_cos        : 9.66%
+dir_sin        : 9.12%
+U_at_z         : 6.76%
+Y_local        : 6.61%
+X_local        : 6.55%
+
+Epoch 450 Importance
+------------------------------
+Bldg_height    : 35.27%
+SDF            : 15.84%
+Z_relative     : 10.27%
+dir_cos        : 9.65%
+dir_sin        : 9.13%
+U_at_z         : 6.75%
+Y_local        : 6.58%
+X_local        : 6.51%
+
+Epoch 460 Importance
+------------------------------
+Bldg_height    : 35.35%
+SDF            : 15.86%
+Z_relative     : 10.27%
+dir_cos        : 9.65%
+dir_sin        : 9.13%
+U_at_z         : 6.74%
+Y_local        : 6.53%
+X_local        : 6.47%
+
+Epoch 470 Importance
+------------------------------
+Bldg_height    : 35.39%
+SDF            : 15.88%
+Z_relative     : 10.27%
+dir_cos        : 9.65%
+dir_sin        : 9.16%
+U_at_z         : 6.73%
+Y_local        : 6.49%
+X_local        : 6.43%
+
+Epoch 480 Importance
+------------------------------
+Bldg_height    : 35.44%
+SDF            : 15.89%
+Z_relative     : 10.28%
+dir_cos        : 9.65%
+dir_sin        : 9.17%
+U_at_z         : 6.73%
+Y_local        : 6.44%
+X_local        : 6.39%
+
+Epoch 490 Importance
+------------------------------
+Bldg_height    : 35.49%
+SDF            : 15.92%
+Z_relative     : 10.28%
+dir_cos        : 9.64%
+dir_sin        : 9.19%
+U_at_z         : 6.72%
+Y_local        : 6.40%
+X_local        : 6.36%
+
+Epoch 500 Importance
+------------------------------
+Bldg_height    : 35.51%
+SDF            : 15.93%
+Z_relative     : 10.28%
+dir_cos        : 9.64%
+dir_sin        : 9.20%
+U_at_z         : 6.72%
+Y_local        : 6.38%
+X_local        : 6.33%
+
+Epoch 510 Importance
+------------------------------
+Bldg_height    : 35.56%
+SDF            : 15.94%
+Z_relative     : 10.28%
+dir_cos        : 9.64%
+dir_sin        : 9.22%
+U_at_z         : 6.72%
+Y_local        : 6.34%
+X_local        : 6.30%
+
+Epoch 520 Importance
+------------------------------
+Bldg_height    : 35.58%
+SDF            : 15.96%
+Z_relative     : 10.29%
+dir_cos        : 9.63%
+dir_sin        : 9.23%
+U_at_z         : 6.72%
+Y_local        : 6.31%
+X_local        : 6.27%
+
+Epoch 530 Importance
+------------------------------
+Bldg_height    : 35.61%
+SDF            : 15.98%
+Z_relative     : 10.29%
+dir_cos        : 9.63%
+dir_sin        : 9.24%
+U_at_z         : 6.72%
+Y_local        : 6.28%
+X_local        : 6.25%
+
+Epoch 540 Importance
+------------------------------
+Bldg_height    : 35.63%
+SDF            : 16.00%
+Z_relative     : 10.29%
+dir_cos        : 9.63%
+dir_sin        : 9.26%
+U_at_z         : 6.72%
+Y_local        : 6.24%
+X_local        : 6.22%
+
+Epoch 550 Importance
+------------------------------
+Bldg_height    : 35.64%
+SDF            : 16.02%
+Z_relative     : 10.29%
+dir_cos        : 9.63%
+dir_sin        : 9.29%
+U_at_z         : 6.72%
+Y_local        : 6.21%
+X_local        : 6.19%
+
+Epoch 560 Importance
+------------------------------
+Bldg_height    : 35.68%
+SDF            : 16.05%
+Z_relative     : 10.30%
+dir_cos        : 9.62%
+dir_sin        : 9.30%
+U_at_z         : 6.71%
+Y_local        : 6.18%
+X_local        : 6.16%
+
+Epoch 570 Importance
+------------------------------
+Bldg_height    : 35.69%
+SDF            : 16.08%
+Z_relative     : 10.30%
+dir_cos        : 9.62%
+dir_sin        : 9.31%
+U_at_z         : 6.71%
+Y_local        : 6.15%
+X_local        : 6.14%
+
+Epoch 580 Importance
+------------------------------
+Bldg_height    : 35.71%
+SDF            : 16.09%
+Z_relative     : 10.31%
+dir_cos        : 9.62%
+dir_sin        : 9.31%
+U_at_z         : 6.72%
+X_local        : 6.12%
+Y_local        : 6.12%
+
+Epoch 590 Importance
+------------------------------
+Bldg_height    : 35.75%
+SDF            : 16.11%
+Z_relative     : 10.31%
+dir_cos        : 9.61%
+dir_sin        : 9.32%
+U_at_z         : 6.71%
+X_local        : 6.10%
+Y_local        : 6.09%
+
+Epoch 600 Importance
+------------------------------
+Bldg_height    : 35.76%
+SDF            : 16.12%
+Z_relative     : 10.31%
+dir_cos        : 9.61%
+dir_sin        : 9.33%
+U_at_z         : 6.72%
+X_local        : 6.08%
+Y_local        : 6.07%
+
+Epoch 610 Importance
+------------------------------
+Bldg_height    : 35.79%
+SDF            : 16.13%
+Z_relative     : 10.30%
+dir_cos        : 9.61%
+dir_sin        : 9.34%
+U_at_z         : 6.71%
+X_local        : 6.07%
+Y_local        : 6.05%
+
+Epoch 620 Importance
+------------------------------
+Bldg_height    : 35.82%
+SDF            : 16.12%
+Z_relative     : 10.30%
+dir_cos        : 9.61%
+dir_sin        : 9.35%
+U_at_z         : 6.71%
+X_local        : 6.05%
+Y_local        : 6.03%
+
+Epoch 630 Importance
+------------------------------
+Bldg_height    : 35.85%
+SDF            : 16.12%
+Z_relative     : 10.30%
+dir_cos        : 9.61%
+dir_sin        : 9.37%
+U_at_z         : 6.71%
+X_local        : 6.03%
+Y_local        : 6.01%
+
+Epoch 640 Importance
+------------------------------
+Bldg_height    : 35.88%
+SDF            : 16.12%
+Z_relative     : 10.30%
+dir_cos        : 9.61%
+dir_sin        : 9.38%
+U_at_z         : 6.72%
+X_local        : 6.00%
+Y_local        : 5.98%
+
+Epoch 650 Importance
+------------------------------
+Bldg_height    : 35.90%
+SDF            : 16.13%
+Z_relative     : 10.30%
+dir_cos        : 9.62%
+dir_sin        : 9.39%
+U_at_z         : 6.71%
+X_local        : 5.99%
+Y_local        : 5.97%
+
+Epoch 660 Importance
+------------------------------
+Bldg_height    : 35.92%
+SDF            : 16.13%
+Z_relative     : 10.30%
+dir_cos        : 9.62%
+dir_sin        : 9.40%
+U_at_z         : 6.72%
+X_local        : 5.97%
+Y_local        : 5.94%
+
+Epoch 670 Importance
+------------------------------
+Bldg_height    : 35.94%
+SDF            : 16.14%
+Z_relative     : 10.30%
+dir_cos        : 9.62%
+dir_sin        : 9.41%
+U_at_z         : 6.72%
+X_local        : 5.95%
+Y_local        : 5.92%
+
+Epoch 680 Importance
+------------------------------
+Bldg_height    : 35.96%
+SDF            : 16.14%
+Z_relative     : 10.30%
+dir_cos        : 9.62%
+dir_sin        : 9.42%
+U_at_z         : 6.71%
+X_local        : 5.94%
+Y_local        : 5.91%
+
+Epoch 690 Importance
+------------------------------
+Bldg_height    : 35.98%
+SDF            : 16.14%
+Z_relative     : 10.29%
+dir_cos        : 9.62%
+dir_sin        : 9.43%
+U_at_z         : 6.71%
+X_local        : 5.93%
+Y_local        : 5.89%
+
+Epoch 700 Importance
+------------------------------
+Bldg_height    : 35.99%
+SDF            : 16.15%
+Z_relative     : 10.29%
+dir_cos        : 9.62%
+dir_sin        : 9.44%
+U_at_z         : 6.71%
+X_local        : 5.91%
+Y_local        : 5.88%
+
+Epoch 710 Importance
+------------------------------
+Bldg_height    : 36.01%
+SDF            : 16.15%
+Z_relative     : 10.29%
+dir_cos        : 9.63%
+dir_sin        : 9.45%
+U_at_z         : 6.71%
+X_local        : 5.90%
+Y_local        : 5.86%
+
+Epoch 720 Importance
+------------------------------
+Bldg_height    : 36.02%
+SDF            : 16.16%
+Z_relative     : 10.29%
+dir_cos        : 9.63%
+dir_sin        : 9.46%
+U_at_z         : 6.72%
+X_local        : 5.88%
+Y_local        : 5.85%
+
+Epoch 730 Importance
+------------------------------
+Bldg_height    : 36.04%
+SDF            : 16.16%
+Z_relative     : 10.29%
+dir_cos        : 9.63%
+dir_sin        : 9.46%
+U_at_z         : 6.71%
+X_local        : 5.87%
+Y_local        : 5.83%
+
+Epoch 740 Importance
+------------------------------
+Bldg_height    : 36.04%
+SDF            : 16.17%
+Z_relative     : 10.29%
+dir_cos        : 9.63%
+dir_sin        : 9.47%
+U_at_z         : 6.72%
+X_local        : 5.86%
+Y_local        : 5.82%
+
+Epoch 750 Importance
+------------------------------
+Bldg_height    : 36.06%
+SDF            : 16.17%
+Z_relative     : 10.29%
+dir_cos        : 9.63%
+dir_sin        : 9.48%
+U_at_z         : 6.71%
+X_local        : 5.85%
+Y_local        : 5.80%
+
+Epoch 760 Importance
+------------------------------
+Bldg_height    : 36.06%
+SDF            : 16.17%
+Z_relative     : 10.29%
+dir_cos        : 9.64%
+dir_sin        : 9.49%
+U_at_z         : 6.71%
+X_local        : 5.84%
+Y_local        : 5.79%
+
+Epoch 770 Importance
+------------------------------
+Bldg_height    : 36.08%
+SDF            : 16.18%
+Z_relative     : 10.29%
+dir_cos        : 9.64%
+dir_sin        : 9.50%
+U_at_z         : 6.71%
+X_local        : 5.83%
+Y_local        : 5.78%
+
+Epoch 780 Importance
+------------------------------
+Bldg_height    : 36.08%
+SDF            : 16.19%
+Z_relative     : 10.29%
+dir_cos        : 9.64%
+dir_sin        : 9.50%
+U_at_z         : 6.71%
+X_local        : 5.82%
+Y_local        : 5.77%
+
+Epoch 790 Importance
+------------------------------
+Bldg_height    : 36.10%
+SDF            : 16.18%
+Z_relative     : 10.29%
+dir_cos        : 9.64%
+dir_sin        : 9.51%
+U_at_z         : 6.71%
+X_local        : 5.80%
+Y_local        : 5.75%
+
+Epoch 800 Importance
+------------------------------
+Bldg_height    : 36.11%
+SDF            : 16.19%
+Z_relative     : 10.29%
+dir_cos        : 9.65%
+dir_sin        : 9.52%
+U_at_z         : 6.71%
+X_local        : 5.79%
+Y_local        : 5.74%
+
+Epoch 810 Importance
+------------------------------
+Bldg_height    : 36.11%
+SDF            : 16.19%
+Z_relative     : 10.29%
+dir_cos        : 9.65%
+dir_sin        : 9.52%
+U_at_z         : 6.71%
+X_local        : 5.79%
+Y_local        : 5.73%
+
+Epoch 820 Importance
+------------------------------
+Bldg_height    : 36.12%
+SDF            : 16.19%
+Z_relative     : 10.29%
+dir_cos        : 9.65%
+dir_sin        : 9.53%
+U_at_z         : 6.71%
+X_local        : 5.78%
+Y_local        : 5.73%
+
+Epoch 830 Importance
+------------------------------
+Bldg_height    : 36.14%
+SDF            : 16.19%
+Z_relative     : 10.28%
+dir_cos        : 9.65%
+dir_sin        : 9.53%
+U_at_z         : 6.71%
+X_local        : 5.78%
+Y_local        : 5.72%
+
+Epoch 840 Importance
+------------------------------
+Bldg_height    : 36.15%
+SDF            : 16.19%
+Z_relative     : 10.28%
+dir_cos        : 9.66%
+dir_sin        : 9.53%
+U_at_z         : 6.71%
+X_local        : 5.77%
+Y_local        : 5.71%
+
+Epoch 850 Importance
+------------------------------
+Bldg_height    : 36.16%
+SDF            : 16.19%
+Z_relative     : 10.28%
+dir_cos        : 9.66%
+dir_sin        : 9.54%
+U_at_z         : 6.71%
+X_local        : 5.76%
+Y_local        : 5.70%
+
+Epoch 860 Importance
+------------------------------
+Bldg_height    : 36.17%
+SDF            : 16.19%
+Z_relative     : 10.28%
+dir_cos        : 9.66%
+dir_sin        : 9.54%
+U_at_z         : 6.71%
+X_local        : 5.75%
+Y_local        : 5.69%
+
+Epoch 870 Importance
+------------------------------
+Bldg_height    : 36.18%
+SDF            : 16.19%
+Z_relative     : 10.28%
+dir_cos        : 9.66%
+dir_sin        : 9.55%
+U_at_z         : 6.71%
+X_local        : 5.74%
+Y_local        : 5.68%
+
+Epoch 880 Importance
+------------------------------
+Bldg_height    : 36.19%
+SDF            : 16.19%
+Z_relative     : 10.28%
+dir_cos        : 9.67%
+dir_sin        : 9.55%
+U_at_z         : 6.71%
+X_local        : 5.74%
+Y_local        : 5.67%
+
+Epoch 890 Importance
+------------------------------
+Bldg_height    : 36.20%
+SDF            : 16.19%
+Z_relative     : 10.28%
+dir_cos        : 9.67%
+dir_sin        : 9.55%
+U_at_z         : 6.71%
+X_local        : 5.73%
+Y_local        : 5.67%
+
+Epoch 900 Importance
+------------------------------
+Bldg_height    : 36.21%
+SDF            : 16.19%
+Z_relative     : 10.28%
+dir_cos        : 9.67%
+dir_sin        : 9.56%
+U_at_z         : 6.71%
+X_local        : 5.72%
+Y_local        : 5.66%
+
+Epoch 910 Importance
+------------------------------
+Bldg_height    : 36.23%
+SDF            : 16.19%
+Z_relative     : 10.28%
+dir_cos        : 9.67%
+dir_sin        : 9.56%
+U_at_z         : 6.71%
+X_local        : 5.72%
+Y_local        : 5.65%
+
+Epoch 920 Importance
+------------------------------
+Bldg_height    : 36.24%
+SDF            : 16.18%
+Z_relative     : 10.28%
+dir_cos        : 9.67%
+dir_sin        : 9.56%
+U_at_z         : 6.71%
+X_local        : 5.71%
+Y_local        : 5.64%
+
+Epoch 930 Importance
+------------------------------
+Bldg_height    : 36.25%
+SDF            : 16.19%
+Z_relative     : 10.27%
+dir_cos        : 9.67%
+dir_sin        : 9.56%
+U_at_z         : 6.71%
+X_local        : 5.70%
+Y_local        : 5.63%
+
+Epoch 940 Importance
+------------------------------
+Bldg_height    : 36.26%
+SDF            : 16.18%
+Z_relative     : 10.27%
+dir_cos        : 9.67%
+dir_sin        : 9.57%
+U_at_z         : 6.71%
+X_local        : 5.70%
+Y_local        : 5.63%
+
+Epoch 950 Importance
+------------------------------
+Bldg_height    : 36.27%
+SDF            : 16.18%
+Z_relative     : 10.27%
+dir_cos        : 9.68%
+dir_sin        : 9.57%
+U_at_z         : 6.71%
+X_local        : 5.69%
+Y_local        : 5.62%
+
+Epoch 960 Importance
+------------------------------
+Bldg_height    : 36.28%
+SDF            : 16.18%
+Z_relative     : 10.27%
+dir_cos        : 9.68%
+dir_sin        : 9.57%
+U_at_z         : 6.71%
+X_local        : 5.68%
+Y_local        : 5.61%
+
+Epoch 970 Importance
+------------------------------
+Bldg_height    : 36.29%
+SDF            : 16.18%
+Z_relative     : 10.27%
+dir_cos        : 9.68%
+dir_sin        : 9.58%
+U_at_z         : 6.71%
+X_local        : 5.68%
+Y_local        : 5.61%
+
+Epoch 980 Importance
+------------------------------
+Bldg_height    : 36.30%
+SDF            : 16.18%
+Z_relative     : 10.27%
+dir_cos        : 9.69%
+dir_sin        : 9.58%
+U_at_z         : 6.71%
+X_local        : 5.67%
+Y_local        : 5.60%
+
+Epoch 10 Importance
+------------------------------
+Bldg_height    : 16.37%
+U_at_z         : 13.22%
+Z_relative     : 12.53%
+X_local        : 12.49%
+SDF            : 12.14%
+dir_cos        : 11.68%
+dir_sin        : 11.07%
+Y_local        : 10.50%
+
+Epoch 20 Importance
+------------------------------
+Bldg_height    : 24.44%
+U_at_z         : 11.95%
+Z_relative     : 11.32%
+X_local        : 11.30%
+SDF            : 11.00%
+dir_cos        : 10.54%
+dir_sin        : 9.98%
+Y_local        : 9.48%
+
+Epoch 30 Importance
+------------------------------
+Bldg_height    : 27.62%
+U_at_z         : 11.46%
+Z_relative     : 10.84%
+X_local        : 10.82%
+SDF            : 10.58%
+dir_cos        : 10.08%
+dir_sin        : 9.53%
+Y_local        : 9.08%
+
+Epoch 40 Importance
+------------------------------
+Bldg_height    : 29.66%
+U_at_z         : 11.13%
+Z_relative     : 10.53%
+X_local        : 10.51%
+SDF            : 10.32%
+dir_cos        : 9.78%
+dir_sin        : 9.24%
+Y_local        : 8.82%
+
+Epoch 50 Importance
+------------------------------
+Bldg_height    : 31.23%
+U_at_z         : 10.88%
+Z_relative     : 10.29%
+X_local        : 10.27%
+SDF            : 10.13%
+dir_cos        : 9.56%
+dir_sin        : 9.01%
+Y_local        : 8.61%
+
+Epoch 60 Importance
+------------------------------
+Bldg_height    : 32.47%
+U_at_z         : 10.67%
+Z_relative     : 10.10%
+X_local        : 10.08%
+SDF            : 10.02%
+dir_cos        : 9.38%
+dir_sin        : 8.84%
+Y_local        : 8.44%
+
+Epoch 70 Importance
+------------------------------
+Bldg_height    : 33.49%
+U_at_z         : 10.50%
+SDF            : 9.95%
+Z_relative     : 9.94%
+X_local        : 9.90%
+dir_cos        : 9.23%
+dir_sin        : 8.69%
+Y_local        : 8.30%
+
+Epoch 80 Importance
+------------------------------
+Bldg_height    : 34.25%
+U_at_z         : 10.35%
+SDF            : 9.93%
+Z_relative     : 9.83%
+X_local        : 9.75%
+dir_cos        : 9.12%
+dir_sin        : 8.59%
+Y_local        : 8.18%
+
+Epoch 90 Importance
+------------------------------
+Bldg_height    : 34.46%
+U_at_z         : 10.29%
+SDF            : 10.00%
+Z_relative     : 9.79%
+X_local        : 9.68%
+dir_cos        : 9.09%
+dir_sin        : 8.57%
+Y_local        : 8.13%
+
+Epoch 100 Importance
+------------------------------
+Bldg_height    : 34.36%
+U_at_z         : 10.25%
+SDF            : 10.15%
+Z_relative     : 9.79%
+X_local        : 9.64%
+dir_cos        : 9.10%
+dir_sin        : 8.60%
+Y_local        : 8.11%
+
+Epoch 110 Importance
+------------------------------
+Bldg_height    : 34.00%
+SDF            : 10.37%
+U_at_z         : 10.25%
+Z_relative     : 9.83%
+X_local        : 9.63%
+dir_cos        : 9.14%
+dir_sin        : 8.67%
+Y_local        : 8.11%
+
+Epoch 120 Importance
+------------------------------
+Bldg_height    : 33.65%
+SDF            : 10.63%
+U_at_z         : 10.23%
+Z_relative     : 9.87%
+X_local        : 9.60%
+dir_cos        : 9.17%
+dir_sin        : 8.75%
+Y_local        : 8.10%
+
+Epoch 130 Importance
+------------------------------
+Bldg_height    : 33.24%
+SDF            : 10.95%
+U_at_z         : 10.20%
+Z_relative     : 9.92%
+X_local        : 9.57%
+dir_cos        : 9.21%
+dir_sin        : 8.82%
+Y_local        : 8.08%
+
+Epoch 140 Importance
+------------------------------
+Bldg_height    : 33.05%
+SDF            : 11.27%
+U_at_z         : 10.13%
+Z_relative     : 9.94%
+X_local        : 9.50%
+dir_cos        : 9.22%
+dir_sin        : 8.87%
+Y_local        : 8.03%
+
+Epoch 150 Importance
+------------------------------
+Bldg_height    : 33.00%
+SDF            : 11.62%
+U_at_z         : 10.02%
+Z_relative     : 9.95%
+X_local        : 9.38%
+dir_cos        : 9.18%
+dir_sin        : 8.92%
+Y_local        : 7.92%
+
+Epoch 160 Importance
+------------------------------
+Bldg_height    : 32.84%
+SDF            : 12.01%
+Z_relative     : 9.99%
+U_at_z         : 9.93%
+X_local        : 9.26%
+dir_cos        : 9.15%
+dir_sin        : 8.99%
+Y_local        : 7.83%
+
+Epoch 170 Importance
+------------------------------
+Bldg_height    : 32.81%
+SDF            : 12.42%
+Z_relative     : 10.04%
+U_at_z         : 9.81%
+dir_cos        : 9.12%
+X_local        : 9.09%
+dir_sin        : 9.00%
+Y_local        : 7.71%
+
+Epoch 180 Importance
+------------------------------
+Bldg_height    : 32.87%
+SDF            : 12.83%
+Z_relative     : 10.08%
+U_at_z         : 9.67%
+dir_cos        : 9.11%
+dir_sin        : 9.00%
+X_local        : 8.88%
+Y_local        : 7.56%
+
+Epoch 190 Importance
+------------------------------
+Bldg_height    : 32.90%
+SDF            : 13.27%
+Z_relative     : 10.14%
+U_at_z         : 9.53%
+dir_cos        : 9.10%
+dir_sin        : 9.01%
+X_local        : 8.66%
+Y_local        : 7.39%
+
+Epoch 200 Importance
+------------------------------
+Bldg_height    : 32.81%
+SDF            : 13.74%
+Z_relative     : 10.23%
+U_at_z         : 9.42%
+dir_cos        : 9.09%
+dir_sin        : 9.03%
+X_local        : 8.45%
+Y_local        : 7.23%
+
+Epoch 210 Importance
+------------------------------
+Bldg_height    : 33.23%
+SDF            : 13.85%
+Z_relative     : 10.25%
+U_at_z         : 9.32%
+dir_cos        : 9.06%
+dir_sin        : 9.01%
+X_local        : 8.23%
+Y_local        : 7.05%
+
+Epoch 220 Importance
+------------------------------
+Bldg_height    : 33.43%
+SDF            : 13.98%
+Z_relative     : 10.30%
+U_at_z         : 9.26%
+dir_cos        : 9.05%
+dir_sin        : 9.02%
+X_local        : 8.05%
+Y_local        : 6.90%
+
+Epoch 230 Importance
+------------------------------
+Bldg_height    : 33.45%
+SDF            : 14.14%
+Z_relative     : 10.38%
+U_at_z         : 9.22%
+dir_sin        : 9.06%
+dir_cos        : 9.06%
+X_local        : 7.91%
+Y_local        : 6.78%
+
+Epoch 240 Importance
+------------------------------
+Bldg_height    : 33.57%
+SDF            : 14.25%
+Z_relative     : 10.45%
+U_at_z         : 9.19%
+dir_sin        : 9.08%
+dir_cos        : 9.05%
+X_local        : 7.76%
+Y_local        : 6.66%
+
+Epoch 250 Importance
+------------------------------
+Bldg_height    : 33.60%
+SDF            : 14.39%
+Z_relative     : 10.52%
+U_at_z         : 9.17%
+dir_sin        : 9.10%
+dir_cos        : 9.04%
+X_local        : 7.62%
+Y_local        : 6.56%
+
+Epoch 260 Importance
+------------------------------
+Bldg_height    : 33.66%
+SDF            : 14.50%
+Z_relative     : 10.60%
+U_at_z         : 9.15%
+dir_sin        : 9.12%
+dir_cos        : 9.03%
+X_local        : 7.48%
+Y_local        : 6.46%
+
+Epoch 270 Importance
+------------------------------
+Bldg_height    : 33.70%
+SDF            : 14.62%
+Z_relative     : 10.69%
+U_at_z         : 9.15%
+dir_sin        : 9.14%
+dir_cos        : 9.02%
+X_local        : 7.33%
+Y_local        : 6.35%
+
+Epoch 280 Importance
+------------------------------
+Bldg_height    : 33.72%
+SDF            : 14.75%
+Z_relative     : 10.76%
+dir_sin        : 9.16%
+U_at_z         : 9.14%
+dir_cos        : 9.00%
+X_local        : 7.21%
+Y_local        : 6.26%
+
+Epoch 290 Importance
+------------------------------
+Bldg_height    : 33.71%
+SDF            : 14.86%
+Z_relative     : 10.84%
+dir_sin        : 9.18%
+U_at_z         : 9.14%
+dir_cos        : 9.01%
+X_local        : 7.08%
+Y_local        : 6.18%
+
+Epoch 300 Importance
+------------------------------
+Bldg_height    : 33.80%
+SDF            : 14.95%
+Z_relative     : 10.90%
+dir_sin        : 9.18%
+U_at_z         : 9.14%
+dir_cos        : 8.99%
+X_local        : 6.95%
+Y_local        : 6.09%
+
+Epoch 310 Importance
+------------------------------
+Bldg_height    : 33.82%
+SDF            : 15.06%
+Z_relative     : 10.98%
+dir_sin        : 9.18%
+U_at_z         : 9.15%
+dir_cos        : 8.99%
+X_local        : 6.83%
+Y_local        : 6.00%
+
+Epoch 320 Importance
+------------------------------
+Bldg_height    : 33.88%
+SDF            : 15.17%
+Z_relative     : 11.05%
+dir_sin        : 9.17%
+U_at_z         : 9.15%
+dir_cos        : 8.97%
+X_local        : 6.70%
+Y_local        : 5.91%
+
+Epoch 330 Importance
+------------------------------
+Bldg_height    : 33.92%
+SDF            : 15.27%
+Z_relative     : 11.11%
+dir_sin        : 9.19%
+U_at_z         : 9.15%
+dir_cos        : 8.95%
+X_local        : 6.58%
+Y_local        : 5.83%
+
+Epoch 340 Importance
+------------------------------
+Bldg_height    : 33.92%
+SDF            : 15.37%
+Z_relative     : 11.18%
+dir_sin        : 9.21%
+U_at_z         : 9.16%
+dir_cos        : 8.95%
+X_local        : 6.47%
+Y_local        : 5.74%
+
+Epoch 350 Importance
+------------------------------
+Bldg_height    : 33.93%
+SDF            : 15.48%
+Z_relative     : 11.24%
+dir_sin        : 9.23%
+U_at_z         : 9.16%
+dir_cos        : 8.94%
+X_local        : 6.36%
+Y_local        : 5.66%
+
+Epoch 360 Importance
+------------------------------
+Bldg_height    : 34.02%
+SDF            : 15.57%
+Z_relative     : 11.30%
+dir_sin        : 9.21%
+U_at_z         : 9.17%
+dir_cos        : 8.92%
+X_local        : 6.24%
+Y_local        : 5.58%
+
+Epoch 370 Importance
+------------------------------
+Bldg_height    : 34.03%
+SDF            : 15.67%
+Z_relative     : 11.34%
+dir_sin        : 9.22%
+U_at_z         : 9.17%
+dir_cos        : 8.92%
+X_local        : 6.15%
+Y_local        : 5.51%
+
+Epoch 380 Importance
+------------------------------
+Bldg_height    : 34.03%
+SDF            : 15.77%
+Z_relative     : 11.39%
+dir_sin        : 9.23%
+U_at_z         : 9.17%
+dir_cos        : 8.92%
+X_local        : 6.05%
+Y_local        : 5.43%
+
+Epoch 390 Importance
+------------------------------
+Bldg_height    : 34.05%
+SDF            : 15.85%
+Z_relative     : 11.44%
+dir_sin        : 9.25%
+U_at_z         : 9.18%
+dir_cos        : 8.93%
+X_local        : 5.95%
+Y_local        : 5.34%
+
+Epoch 400 Importance
+------------------------------
+Bldg_height    : 34.09%
+SDF            : 15.94%
+Z_relative     : 11.48%
+dir_sin        : 9.27%
+U_at_z         : 9.18%
+dir_cos        : 8.93%
+X_local        : 5.85%
+Y_local        : 5.26%
+
+Epoch 410 Importance
+------------------------------
+Bldg_height    : 34.15%
+SDF            : 15.93%
+Z_relative     : 11.51%
+dir_sin        : 9.28%
+U_at_z         : 9.18%
+dir_cos        : 8.93%
+X_local        : 5.80%
+Y_local        : 5.22%
+
+Epoch 420 Importance
+------------------------------
+Bldg_height    : 34.22%
+SDF            : 15.94%
+Z_relative     : 11.53%
+dir_sin        : 9.31%
+U_at_z         : 9.18%
+dir_cos        : 8.94%
+X_local        : 5.73%
+Y_local        : 5.16%
+
+Epoch 430 Importance
+------------------------------
+Bldg_height    : 34.24%
+SDF            : 15.95%
+Z_relative     : 11.56%
+dir_sin        : 9.33%
+U_at_z         : 9.19%
+dir_cos        : 8.95%
+X_local        : 5.67%
+Y_local        : 5.11%
+
+Epoch 440 Importance
+------------------------------
+Bldg_height    : 34.29%
+SDF            : 15.97%
+Z_relative     : 11.57%
+dir_sin        : 9.34%
+U_at_z         : 9.19%
+dir_cos        : 8.94%
+X_local        : 5.63%
+Y_local        : 5.07%
+
+Epoch 450 Importance
+------------------------------
+Bldg_height    : 34.35%
+SDF            : 15.97%
+Z_relative     : 11.58%
+dir_sin        : 9.36%
+U_at_z         : 9.19%
+dir_cos        : 8.95%
+X_local        : 5.57%
+Y_local        : 5.02%
+
+Epoch 460 Importance
+------------------------------
+Bldg_height    : 34.38%
+SDF            : 15.98%
+Z_relative     : 11.60%
+dir_sin        : 9.37%
+U_at_z         : 9.20%
+dir_cos        : 8.96%
+X_local        : 5.52%
+Y_local        : 4.98%
+
+Epoch 470 Importance
+------------------------------
+Bldg_height    : 34.42%
+SDF            : 16.00%
+Z_relative     : 11.61%
+dir_sin        : 9.38%
+U_at_z         : 9.19%
+dir_cos        : 8.96%
+X_local        : 5.48%
+Y_local        : 4.95%
+
+Epoch 480 Importance
+------------------------------
+Bldg_height    : 34.46%
+SDF            : 16.01%
+Z_relative     : 11.63%
+dir_sin        : 9.39%
+U_at_z         : 9.19%
+dir_cos        : 8.96%
+X_local        : 5.44%
+Y_local        : 4.91%
+
+Epoch 490 Importance
+------------------------------
+Bldg_height    : 34.51%
+SDF            : 16.03%
+Z_relative     : 11.64%
+dir_sin        : 9.40%
+U_at_z         : 9.19%
+dir_cos        : 8.96%
+X_local        : 5.40%
+Y_local        : 4.88%
+
+Epoch 500 Importance
+------------------------------
+Bldg_height    : 34.55%
+SDF            : 16.04%
+Z_relative     : 11.64%
+dir_sin        : 9.40%
+U_at_z         : 9.19%
+dir_cos        : 8.96%
+X_local        : 5.37%
+Y_local        : 4.85%
+
+Epoch 510 Importance
+------------------------------
+Bldg_height    : 34.59%
+SDF            : 16.05%
+Z_relative     : 11.65%
+dir_sin        : 9.41%
+U_at_z         : 9.19%
+dir_cos        : 8.96%
+X_local        : 5.34%
+Y_local        : 4.82%
+
+Epoch 520 Importance
+------------------------------
+Bldg_height    : 34.64%
+SDF            : 16.06%
+Z_relative     : 11.66%
+dir_sin        : 9.42%
+U_at_z         : 9.18%
+dir_cos        : 8.95%
+X_local        : 5.31%
+Y_local        : 4.79%
+
+Epoch 530 Importance
+------------------------------
+Bldg_height    : 34.65%
+SDF            : 16.08%
+Z_relative     : 11.68%
+dir_sin        : 9.43%
+U_at_z         : 9.19%
+dir_cos        : 8.95%
+X_local        : 5.28%
+Y_local        : 4.75%
+
+Epoch 540 Importance
+------------------------------
+Bldg_height    : 34.69%
+SDF            : 16.09%
+Z_relative     : 11.68%
+dir_sin        : 9.44%
+U_at_z         : 9.18%
+dir_cos        : 8.95%
+X_local        : 5.24%
+Y_local        : 4.73%
+
+Epoch 550 Importance
+------------------------------
+Bldg_height    : 34.71%
+SDF            : 16.11%
+Z_relative     : 11.68%
+dir_sin        : 9.45%
+U_at_z         : 9.17%
+dir_cos        : 8.95%
+X_local        : 5.22%
+Y_local        : 4.70%
+
+Epoch 560 Importance
+------------------------------
+Bldg_height    : 34.74%
+SDF            : 16.12%
+Z_relative     : 11.69%
+dir_sin        : 9.46%
+U_at_z         : 9.17%
+dir_cos        : 8.95%
+X_local        : 5.19%
+Y_local        : 4.67%
+
+Epoch 570 Importance
+------------------------------
+Bldg_height    : 34.76%
+SDF            : 16.14%
+Z_relative     : 11.70%
+dir_sin        : 9.47%
+U_at_z         : 9.17%
+dir_cos        : 8.95%
+X_local        : 5.16%
+Y_local        : 4.65%
+
+Epoch 580 Importance
+------------------------------
+Bldg_height    : 34.78%
+SDF            : 16.16%
+Z_relative     : 11.71%
+dir_sin        : 9.48%
+U_at_z         : 9.17%
+dir_cos        : 8.95%
+X_local        : 5.14%
+Y_local        : 4.62%
+
+Epoch 590 Importance
+------------------------------
+Bldg_height    : 34.82%
+SDF            : 16.16%
+Z_relative     : 11.71%
+dir_sin        : 9.48%
+U_at_z         : 9.17%
+dir_cos        : 8.95%
+X_local        : 5.11%
+Y_local        : 4.60%
+
+Epoch 600 Importance
+------------------------------
+Bldg_height    : 34.84%
+SDF            : 16.18%
+Z_relative     : 11.72%
+dir_sin        : 9.49%
+U_at_z         : 9.16%
+dir_cos        : 8.95%
+X_local        : 5.09%
+Y_local        : 4.57%
+
+Epoch 610 Importance
+------------------------------
+Bldg_height    : 34.89%
+SDF            : 16.18%
+Z_relative     : 11.71%
+dir_sin        : 9.49%
+U_at_z         : 9.15%
+dir_cos        : 8.95%
+X_local        : 5.07%
+Y_local        : 4.56%
+
+Epoch 620 Importance
+------------------------------
+Bldg_height    : 34.93%
+SDF            : 16.16%
+Z_relative     : 11.70%
+dir_sin        : 9.50%
+U_at_z         : 9.15%
+dir_cos        : 8.95%
+X_local        : 5.05%
+Y_local        : 4.55%
+
+Epoch 630 Importance
+------------------------------
+Bldg_height    : 34.98%
+SDF            : 16.15%
+Z_relative     : 11.70%
+dir_sin        : 9.50%
+U_at_z         : 9.14%
+dir_cos        : 8.95%
+X_local        : 5.04%
+Y_local        : 4.53%
+
+Epoch 640 Importance
+------------------------------
+Bldg_height    : 35.00%
+SDF            : 16.15%
+Z_relative     : 11.70%
+dir_sin        : 9.51%
+U_at_z         : 9.14%
+dir_cos        : 8.96%
+X_local        : 5.02%
+Y_local        : 4.52%
+
+Epoch 650 Importance
+------------------------------
+Bldg_height    : 35.03%
+SDF            : 16.15%
+Z_relative     : 11.70%
+dir_sin        : 9.51%
+U_at_z         : 9.14%
+dir_cos        : 8.96%
+X_local        : 5.01%
+Y_local        : 4.51%
+
+Epoch 660 Importance
+------------------------------
+Bldg_height    : 35.06%
+SDF            : 16.14%
+Z_relative     : 11.70%
+dir_sin        : 9.52%
+U_at_z         : 9.13%
+dir_cos        : 8.96%
+X_local        : 4.99%
+Y_local        : 4.49%
+
+Epoch 670 Importance
+------------------------------
+Bldg_height    : 35.10%
+SDF            : 16.13%
+Z_relative     : 11.70%
+dir_sin        : 9.52%
+U_at_z         : 9.13%
+dir_cos        : 8.96%
+X_local        : 4.98%
+Y_local        : 4.48%
+
+Epoch 680 Importance
+------------------------------
+Bldg_height    : 35.14%
+SDF            : 16.13%
+Z_relative     : 11.70%
+dir_sin        : 9.52%
+U_at_z         : 9.12%
+dir_cos        : 8.96%
+X_local        : 4.97%
+Y_local        : 4.47%
+
+Epoch 690 Importance
+------------------------------
+Bldg_height    : 35.17%
+SDF            : 16.13%
+Z_relative     : 11.70%
+dir_sin        : 9.52%
+U_at_z         : 9.12%
+dir_cos        : 8.96%
+X_local        : 4.95%
+Y_local        : 4.46%
+
+Epoch 700 Importance
+------------------------------
+Bldg_height    : 35.19%
+SDF            : 16.12%
+Z_relative     : 11.70%
+dir_sin        : 9.52%
+U_at_z         : 9.12%
+dir_cos        : 8.96%
+X_local        : 4.94%
+Y_local        : 4.45%
+
+Epoch 710 Importance
+------------------------------
+Bldg_height    : 35.23%
+SDF            : 16.12%
+Z_relative     : 11.69%
+dir_sin        : 9.52%
+U_at_z         : 9.11%
+dir_cos        : 8.96%
+X_local        : 4.93%
+Y_local        : 4.43%
+
+Epoch 720 Importance
+------------------------------
+Bldg_height    : 35.26%
+SDF            : 16.12%
+Z_relative     : 11.69%
+dir_sin        : 9.53%
+U_at_z         : 9.11%
+dir_cos        : 8.96%
+X_local        : 4.92%
+Y_local        : 4.42%
+
+Epoch 730 Importance
+------------------------------
+Bldg_height    : 35.27%
+SDF            : 16.11%
+Z_relative     : 11.69%
+dir_sin        : 9.53%
+U_at_z         : 9.10%
+dir_cos        : 8.96%
+X_local        : 4.91%
+Y_local        : 4.41%
+
+Epoch 740 Importance
+------------------------------
+Bldg_height    : 35.29%
+SDF            : 16.11%
+Z_relative     : 11.69%
+dir_sin        : 9.53%
+U_at_z         : 9.10%
+dir_cos        : 8.97%
+X_local        : 4.90%
+Y_local        : 4.41%
+
+Epoch 750 Importance
+------------------------------
+Bldg_height    : 35.32%
+SDF            : 16.10%
+Z_relative     : 11.69%
+dir_sin        : 9.54%
+U_at_z         : 9.10%
+dir_cos        : 8.97%
+X_local        : 4.89%
+Y_local        : 4.40%
+
+Epoch 760 Importance
+------------------------------
+Bldg_height    : 35.35%
+SDF            : 16.10%
+Z_relative     : 11.69%
+dir_sin        : 9.54%
+U_at_z         : 9.10%
+dir_cos        : 8.97%
+X_local        : 4.88%
+Y_local        : 4.39%
+
+Epoch 770 Importance
+------------------------------
+Bldg_height    : 35.36%
+SDF            : 16.10%
+Z_relative     : 11.69%
+dir_sin        : 9.54%
+U_at_z         : 9.09%
+dir_cos        : 8.97%
+X_local        : 4.87%
+Y_local        : 4.38%
+
+Epoch 780 Importance
+------------------------------
+Bldg_height    : 35.39%
+SDF            : 16.10%
+Z_relative     : 11.69%
+dir_sin        : 9.54%
+U_at_z         : 9.09%
+dir_cos        : 8.97%
+X_local        : 4.86%
+Y_local        : 4.37%
+
+Epoch 790 Importance
+------------------------------
+Bldg_height    : 35.42%
+SDF            : 16.09%
+Z_relative     : 11.69%
+dir_sin        : 9.54%
+U_at_z         : 9.09%
+dir_cos        : 8.97%
+X_local        : 4.85%
+Y_local        : 4.36%
+
+Epoch 800 Importance
+------------------------------
+Bldg_height    : 35.43%
+SDF            : 16.09%
+Z_relative     : 11.69%
+dir_sin        : 9.54%
+U_at_z         : 9.08%
+dir_cos        : 8.97%
+X_local        : 4.84%
+Y_local        : 4.35%
+
+Epoch 810 Importance
+------------------------------
+Bldg_height    : 35.45%
+SDF            : 16.09%
+Z_relative     : 11.69%
+dir_sin        : 9.54%
+U_at_z         : 9.08%
+dir_cos        : 8.97%
+X_local        : 4.83%
+Y_local        : 4.34%
+
+Epoch 820 Importance
+------------------------------
+Bldg_height    : 35.46%
+SDF            : 16.09%
+Z_relative     : 11.69%
+dir_sin        : 9.54%
+U_at_z         : 9.08%
+dir_cos        : 8.98%
+X_local        : 4.83%
+Y_local        : 4.34%
+
+Epoch 830 Importance
+------------------------------
+Bldg_height    : 35.48%
+SDF            : 16.08%
+Z_relative     : 11.69%
+dir_sin        : 9.54%
+U_at_z         : 9.07%
+dir_cos        : 8.98%
+X_local        : 4.82%
+Y_local        : 4.33%
+
+Epoch 840 Importance
+------------------------------
+Bldg_height    : 35.50%
+SDF            : 16.07%
+Z_relative     : 11.68%
+dir_sin        : 9.54%
+U_at_z         : 9.07%
+dir_cos        : 8.98%
+X_local        : 4.82%
+Y_local        : 4.33%
+
+Epoch 850 Importance
+------------------------------
+Bldg_height    : 35.52%
+SDF            : 16.07%
+Z_relative     : 11.68%
+dir_sin        : 9.54%
+U_at_z         : 9.07%
+dir_cos        : 8.98%
+X_local        : 4.81%
+Y_local        : 4.32%
+
+Epoch 860 Importance
+------------------------------
+Bldg_height    : 35.54%
+SDF            : 16.06%
+Z_relative     : 11.68%
+dir_sin        : 9.54%
+U_at_z         : 9.07%
+dir_cos        : 8.98%
+X_local        : 4.81%
+Y_local        : 4.32%
+
+Epoch 870 Importance
+------------------------------
+Bldg_height    : 35.56%
+SDF            : 16.05%
+Z_relative     : 11.68%
+dir_sin        : 9.54%
+U_at_z         : 9.06%
+dir_cos        : 8.98%
+X_local        : 4.80%
+Y_local        : 4.31%
+
+Epoch 880 Importance
+------------------------------
+Bldg_height    : 35.58%
+SDF            : 16.05%
+Z_relative     : 11.68%
+dir_sin        : 9.54%
+U_at_z         : 9.06%
+dir_cos        : 8.99%
+X_local        : 4.79%
+Y_local        : 4.31%
+
+Epoch 890 Importance
+------------------------------
+Bldg_height    : 35.59%
+SDF            : 16.04%
+Z_relative     : 11.68%
+dir_sin        : 9.55%
+U_at_z         : 9.06%
+dir_cos        : 8.99%
+X_local        : 4.79%
+Y_local        : 4.30%
+
+Epoch 900 Importance
+------------------------------
+Bldg_height    : 35.61%
+SDF            : 16.04%
+Z_relative     : 11.67%
+dir_sin        : 9.55%
+U_at_z         : 9.06%
+dir_cos        : 8.99%
+X_local        : 4.78%
+Y_local        : 4.30%
+
+Epoch 910 Importance
+------------------------------
+Bldg_height    : 35.62%
+SDF            : 16.04%
+Z_relative     : 11.67%
+dir_sin        : 9.55%
+U_at_z         : 9.06%
+dir_cos        : 8.99%
+X_local        : 4.78%
+Y_local        : 4.29%
+
+Epoch 920 Importance
+------------------------------
+Bldg_height    : 35.64%
+SDF            : 16.03%
+Z_relative     : 11.67%
+dir_sin        : 9.55%
+U_at_z         : 9.05%
+dir_cos        : 8.99%
+X_local        : 4.77%
+Y_local        : 4.29%
+
+Epoch 930 Importance
+------------------------------
+Bldg_height    : 35.65%
+SDF            : 16.03%
+Z_relative     : 11.67%
+dir_sin        : 9.55%
+U_at_z         : 9.05%
+dir_cos        : 9.00%
+X_local        : 4.77%
+Y_local        : 4.28%
+
+Epoch 940 Importance
+------------------------------
+Bldg_height    : 35.67%
+SDF            : 16.02%
+Z_relative     : 11.67%
+dir_sin        : 9.55%
+U_at_z         : 9.05%
+dir_cos        : 9.00%
+X_local        : 4.76%
+Y_local        : 4.28%
+
+Epoch 950 Importance
+------------------------------
+Bldg_height    : 35.68%
+SDF            : 16.02%
+Z_relative     : 11.67%
+dir_sin        : 9.55%
+U_at_z         : 9.05%
+dir_cos        : 9.00%
+X_local        : 4.76%
+Y_local        : 4.27%
+
+Epoch 960 Importance
+------------------------------
+Bldg_height    : 35.69%
+SDF            : 16.01%
+Z_relative     : 11.67%
+dir_sin        : 9.55%
+U_at_z         : 9.05%
+dir_cos        : 9.00%
+X_local        : 4.75%
+Y_local        : 4.27%
+
+Epoch 970 Importance
+------------------------------
+Bldg_height    : 35.71%
+SDF            : 16.01%
+Z_relative     : 11.67%
+dir_sin        : 9.56%
+U_at_z         : 9.05%
+dir_cos        : 9.00%
+X_local        : 4.75%
+Y_local        : 4.26%
+
+Epoch 980 Importance
+------------------------------
+Bldg_height    : 35.72%
+SDF            : 16.00%
+Z_relative     : 11.67%
+dir_sin        : 9.56%
+U_at_z         : 9.04%
+dir_cos        : 9.00%
+X_local        : 4.74%
+Y_local        : 4.26%
+
+Epoch 990 Importance
+------------------------------
+Bldg_height    : 35.73%
+SDF            : 16.00%
+Z_relative     : 11.67%
+dir_sin        : 9.56%
+U_at_z         : 9.04%
+dir_cos        : 9.01%
+X_local        : 4.74%
+Y_local        : 4.25%
+
+Epoch 1000 Importance
+------------------------------
+Bldg_height    : 35.74%
+SDF            : 15.99%
+Z_relative     : 11.67%
+dir_sin        : 9.56%
+U_at_z         : 9.04%
+dir_cos        : 9.01%
+X_local        : 4.73%
+Y_local        : 4.25%
+
+Final Importance
+------------------------------
+Bldg_height    : 35.74%
+SDF            : 15.99%
+Z_relative     : 11.67%
+dir_sin        : 9.56%
+U_at_z         : 9.04%
+dir_cos        : 9.01%
+X_local        : 4.73%
+Y_local        : 4.25%
+
+Epoch 10 Importance
+------------------------------
+Bldg_height    : 18.26%
+Z_relative     : 12.84%
+U_at_z         : 12.12%
+Y_local        : 11.97%
+SDF            : 11.62%
+dir_sin        : 11.44%
+X_local        : 11.20%
+dir_cos        : 10.57%
+
+Epoch 20 Importance
+------------------------------
+Bldg_height    : 25.38%
+Z_relative     : 11.72%
+U_at_z         : 11.07%
+Y_local        : 10.92%
+SDF            : 10.64%
+dir_sin        : 10.41%
+X_local        : 10.24%
+dir_cos        : 9.61%
+
+Epoch 30 Importance
+------------------------------
+Bldg_height    : 28.27%
+Z_relative     : 11.27%
+U_at_z         : 10.64%
+Y_local        : 10.49%
+SDF            : 10.27%
+dir_sin        : 9.99%
+X_local        : 9.85%
+dir_cos        : 9.22%
+
+Epoch 40 Importance
+------------------------------
+Bldg_height    : 30.10%
+Z_relative     : 10.99%
+U_at_z         : 10.35%
+Y_local        : 10.21%
+SDF            : 10.07%
+dir_sin        : 9.71%
+X_local        : 9.60%
+dir_cos        : 8.96%
+
+Epoch 50 Importance
+------------------------------
+Bldg_height    : 31.52%
+Z_relative     : 10.76%
+U_at_z         : 10.13%
+Y_local        : 9.98%
+SDF            : 9.94%
+dir_sin        : 9.50%
+X_local        : 9.40%
+dir_cos        : 8.76%
+
+Epoch 60 Importance
+------------------------------
+Bldg_height    : 32.73%
+Z_relative     : 10.57%
+U_at_z         : 9.93%
+SDF            : 9.85%
+Y_local        : 9.78%
+dir_sin        : 9.33%
+X_local        : 9.23%
+dir_cos        : 8.59%
+
+Epoch 70 Importance
+------------------------------
+Bldg_height    : 33.69%
+Z_relative     : 10.41%
+SDF            : 9.82%
+U_at_z         : 9.76%
+Y_local        : 9.62%
+dir_sin        : 9.18%
+X_local        : 9.07%
+dir_cos        : 8.45%
+
+Epoch 80 Importance
+------------------------------
+Bldg_height    : 34.30%
+Z_relative     : 10.32%
+SDF            : 9.86%
+U_at_z         : 9.62%
+Y_local        : 9.49%
+dir_sin        : 9.09%
+X_local        : 8.96%
+dir_cos        : 8.36%
+
+Epoch 90 Importance
+------------------------------
+Bldg_height    : 34.31%
+Z_relative     : 10.31%
+SDF            : 10.00%
+U_at_z         : 9.56%
+Y_local        : 9.44%
+dir_sin        : 9.09%
+X_local        : 8.93%
+dir_cos        : 8.35%
+
+Epoch 100 Importance
+------------------------------
+Bldg_height    : 33.94%
+Z_relative     : 10.35%
+SDF            : 10.24%
+U_at_z         : 9.55%
+Y_local        : 9.43%
+dir_sin        : 9.14%
+X_local        : 8.93%
+dir_cos        : 8.40%
+
+Epoch 110 Importance
+------------------------------
+Bldg_height    : 33.74%
+SDF            : 10.50%
+Z_relative     : 10.37%
+U_at_z         : 9.50%
+Y_local        : 9.38%
+dir_sin        : 9.17%
+X_local        : 8.91%
+dir_cos        : 8.43%
+
+Epoch 120 Importance
+------------------------------
+Bldg_height    : 33.39%
+SDF            : 10.84%
+Z_relative     : 10.40%
+U_at_z         : 9.46%
+Y_local        : 9.33%
+dir_sin        : 9.22%
+X_local        : 8.88%
+dir_cos        : 8.49%
+
+Epoch 130 Importance
+------------------------------
+Bldg_height    : 33.03%
+SDF            : 11.27%
+Z_relative     : 10.43%
+U_at_z         : 9.38%
+Y_local        : 9.26%
+dir_sin        : 9.25%
+X_local        : 8.84%
+dir_cos        : 8.53%
+
+Epoch 140 Importance
+------------------------------
+Bldg_height    : 32.95%
+SDF            : 11.70%
+Z_relative     : 10.40%
+U_at_z         : 9.26%
+dir_sin        : 9.22%
+Y_local        : 9.15%
+X_local        : 8.79%
+dir_cos        : 8.51%
+
+Epoch 150 Importance
+------------------------------
+Bldg_height    : 32.94%
+SDF            : 12.19%
+Z_relative     : 10.37%
+dir_sin        : 9.18%
+U_at_z         : 9.11%
+Y_local        : 9.01%
+X_local        : 8.72%
+dir_cos        : 8.47%
+
+Epoch 160 Importance
+------------------------------
+Bldg_height    : 32.87%
+SDF            : 12.73%
+Z_relative     : 10.34%
+dir_sin        : 9.14%
+U_at_z         : 8.95%
+Y_local        : 8.86%
+X_local        : 8.66%
+dir_cos        : 8.45%
+
+Epoch 170 Importance
+------------------------------
+Bldg_height    : 32.75%
+SDF            : 13.27%
+Z_relative     : 10.33%
+dir_sin        : 9.09%
+U_at_z         : 8.79%
+Y_local        : 8.70%
+X_local        : 8.61%
+dir_cos        : 8.45%
+
+Epoch 180 Importance
+------------------------------
+Bldg_height    : 32.63%
+SDF            : 13.78%
+Z_relative     : 10.34%
+dir_sin        : 9.07%
+U_at_z         : 8.63%
+Y_local        : 8.55%
+X_local        : 8.53%
+dir_cos        : 8.46%
+
+Epoch 190 Importance
+------------------------------
+Bldg_height    : 32.60%
+SDF            : 14.29%
+Z_relative     : 10.36%
+dir_sin        : 9.04%
+dir_cos        : 8.46%
+U_at_z         : 8.45%
+X_local        : 8.41%
+Y_local        : 8.40%
+
+Epoch 200 Importance
+------------------------------
+Bldg_height    : 32.61%
+SDF            : 14.79%
+Z_relative     : 10.40%
+dir_sin        : 8.92%
+dir_cos        : 8.41%
+U_at_z         : 8.30%
+Y_local        : 8.29%
+X_local        : 8.29%
+
+Epoch 210 Importance
+------------------------------
+Bldg_height    : 33.00%
+SDF            : 14.92%
+Z_relative     : 10.37%
+dir_sin        : 8.91%
+dir_cos        : 8.41%
+U_at_z         : 8.16%
+Y_local        : 8.16%
+X_local        : 8.08%
+
+Epoch 220 Importance
+------------------------------
+Bldg_height    : 33.26%
+SDF            : 15.02%
+Z_relative     : 10.39%
+dir_sin        : 8.91%
+dir_cos        : 8.43%
+U_at_z         : 8.06%
+Y_local        : 8.02%
+X_local        : 7.90%
+
+Epoch 230 Importance
+------------------------------
+Bldg_height    : 33.45%
+SDF            : 15.15%
+Z_relative     : 10.42%
+dir_sin        : 8.90%
+dir_cos        : 8.44%
+U_at_z         : 7.97%
+Y_local        : 7.92%
+X_local        : 7.75%
+
+Epoch 240 Importance
+------------------------------
+Bldg_height    : 33.63%
+SDF            : 15.29%
+Z_relative     : 10.45%
+dir_sin        : 8.90%
+dir_cos        : 8.42%
+U_at_z         : 7.88%
+Y_local        : 7.84%
+X_local        : 7.59%
+
+Epoch 250 Importance
+------------------------------
+Bldg_height    : 33.66%
+SDF            : 15.44%
+Z_relative     : 10.50%
+dir_sin        : 8.89%
+dir_cos        : 8.43%
+U_at_z         : 7.82%
+Y_local        : 7.78%
+X_local        : 7.48%
+
+Epoch 260 Importance
+------------------------------
+Bldg_height    : 33.84%
+SDF            : 15.52%
+Z_relative     : 10.51%
+dir_sin        : 8.88%
+dir_cos        : 8.43%
+U_at_z         : 7.74%
+Y_local        : 7.72%
+X_local        : 7.37%
+
+Epoch 270 Importance
+------------------------------
+Bldg_height    : 34.00%
+SDF            : 15.60%
+Z_relative     : 10.55%
+dir_sin        : 8.85%
+dir_cos        : 8.40%
+U_at_z         : 7.70%
+Y_local        : 7.64%
+X_local        : 7.26%
+
+Epoch 280 Importance
+------------------------------
+Bldg_height    : 34.07%
+SDF            : 15.72%
+Z_relative     : 10.58%
+dir_sin        : 8.84%
+dir_cos        : 8.39%
+U_at_z         : 7.66%
+Y_local        : 7.59%
+X_local        : 7.16%
+
+Epoch 290 Importance
+------------------------------
+Bldg_height    : 34.14%
+SDF            : 15.82%
+Z_relative     : 10.62%
+dir_sin        : 8.83%
+dir_cos        : 8.42%
+U_at_z         : 7.62%
+Y_local        : 7.49%
+X_local        : 7.06%
+
+Epoch 300 Importance
+------------------------------
+Bldg_height    : 34.22%
+SDF            : 15.89%
+Z_relative     : 10.65%
+dir_sin        : 8.83%
+dir_cos        : 8.44%
+U_at_z         : 7.59%
+Y_local        : 7.41%
+X_local        : 6.97%
+
+Epoch 310 Importance
+------------------------------
+Bldg_height    : 34.22%
+SDF            : 15.98%
+Z_relative     : 10.70%
+dir_sin        : 8.83%
+dir_cos        : 8.47%
+U_at_z         : 7.58%
+Y_local        : 7.35%
+X_local        : 6.88%
+
+Epoch 320 Importance
+------------------------------
+Bldg_height    : 34.29%
+SDF            : 16.05%
+Z_relative     : 10.72%
+dir_sin        : 8.84%
+dir_cos        : 8.50%
+U_at_z         : 7.56%
+Y_local        : 7.26%
+X_local        : 6.78%
+
+Epoch 330 Importance
+------------------------------
+Bldg_height    : 34.32%
+SDF            : 16.12%
+Z_relative     : 10.76%
+dir_sin        : 8.87%
+dir_cos        : 8.52%
+U_at_z         : 7.55%
+Y_local        : 7.18%
+X_local        : 6.68%
+
+Epoch 340 Importance
+------------------------------
+Bldg_height    : 34.36%
+SDF            : 16.19%
+Z_relative     : 10.80%
+dir_sin        : 8.86%
+dir_cos        : 8.54%
+U_at_z         : 7.55%
+Y_local        : 7.10%
+X_local        : 6.59%
+
+Epoch 350 Importance
+------------------------------
+Bldg_height    : 34.39%
+SDF            : 16.30%
+Z_relative     : 10.83%
+dir_sin        : 8.85%
+dir_cos        : 8.51%
+U_at_z         : 7.54%
+Y_local        : 7.05%
+X_local        : 6.52%
+
+Epoch 360 Importance
+------------------------------
+Bldg_height    : 34.45%
+SDF            : 16.38%
+Z_relative     : 10.86%
+dir_sin        : 8.87%
+dir_cos        : 8.51%
+U_at_z         : 7.53%
+Y_local        : 6.97%
+X_local        : 6.43%
+
+Epoch 370 Importance
+------------------------------
+Bldg_height    : 34.41%
+SDF            : 16.48%
+Z_relative     : 10.90%
+dir_sin        : 8.85%
+dir_cos        : 8.54%
+U_at_z         : 7.53%
+Y_local        : 6.94%
+X_local        : 6.35%
+
+Epoch 380 Importance
+------------------------------
+Bldg_height    : 34.48%
+SDF            : 16.53%
+Z_relative     : 10.92%
+dir_sin        : 8.84%
+dir_cos        : 8.57%
+U_at_z         : 7.52%
+Y_local        : 6.88%
+X_local        : 6.26%
+
+Epoch 390 Importance
+------------------------------
+Bldg_height    : 34.47%
+SDF            : 16.57%
+Z_relative     : 10.95%
+dir_sin        : 8.87%
+dir_cos        : 8.63%
+U_at_z         : 7.53%
+Y_local        : 6.81%
+X_local        : 6.17%
+
+Epoch 400 Importance
+------------------------------
+Bldg_height    : 34.49%
+SDF            : 16.63%
+Z_relative     : 10.98%
+dir_sin        : 8.88%
+dir_cos        : 8.67%
+U_at_z         : 7.53%
+Y_local        : 6.74%
+X_local        : 6.08%
+
+Epoch 410 Importance
+------------------------------
+Bldg_height    : 34.62%
+SDF            : 16.60%
+Z_relative     : 10.98%
+dir_sin        : 8.89%
+dir_cos        : 8.70%
+U_at_z         : 7.52%
+Y_local        : 6.67%
+X_local        : 6.02%
+
+Epoch 420 Importance
+------------------------------
+Bldg_height    : 34.75%
+SDF            : 16.55%
+Z_relative     : 10.97%
+dir_sin        : 8.91%
+dir_cos        : 8.74%
+U_at_z         : 7.51%
+Y_local        : 6.61%
+X_local        : 5.95%
+
+Epoch 430 Importance
+------------------------------
+Bldg_height    : 34.83%
+SDF            : 16.54%
+Z_relative     : 10.98%
+dir_sin        : 8.92%
+dir_cos        : 8.77%
+U_at_z         : 7.50%
+Y_local        : 6.56%
+X_local        : 5.89%
+
+Epoch 440 Importance
+------------------------------
+Bldg_height    : 34.86%
+SDF            : 16.54%
+Z_relative     : 10.99%
+dir_sin        : 8.95%
+dir_cos        : 8.80%
+U_at_z         : 7.50%
+Y_local        : 6.52%
+X_local        : 5.84%
+
+Epoch 450 Importance
+------------------------------
+Bldg_height    : 34.92%
+SDF            : 16.52%
+Z_relative     : 11.00%
+dir_sin        : 8.96%
+dir_cos        : 8.84%
+U_at_z         : 7.50%
+Y_local        : 6.47%
+X_local        : 5.79%
+
+Epoch 460 Importance
+------------------------------
+Bldg_height    : 34.96%
+SDF            : 16.53%
+Z_relative     : 11.00%
+dir_sin        : 8.98%
+dir_cos        : 8.86%
+U_at_z         : 7.50%
+Y_local        : 6.43%
+X_local        : 5.75%
+
+Epoch 470 Importance
+------------------------------
+Bldg_height    : 34.99%
+SDF            : 16.52%
+Z_relative     : 11.01%
+dir_sin        : 9.00%
+dir_cos        : 8.88%
+U_at_z         : 7.51%
+Y_local        : 6.38%
+X_local        : 5.70%
+
+Epoch 480 Importance
+------------------------------
+Bldg_height    : 35.03%
+SDF            : 16.51%
+Z_relative     : 11.02%
+dir_sin        : 9.02%
+dir_cos        : 8.91%
+U_at_z         : 7.51%
+Y_local        : 6.34%
+X_local        : 5.66%
+
+Epoch 490 Importance
+------------------------------
+Bldg_height    : 35.07%
+SDF            : 16.51%
+Z_relative     : 11.03%
+dir_sin        : 9.04%
+dir_cos        : 8.93%
+U_at_z         : 7.51%
+Y_local        : 6.30%
+X_local        : 5.62%
+
+Epoch 500 Importance
+------------------------------
+Bldg_height    : 35.09%
+SDF            : 16.51%
+Z_relative     : 11.04%
+dir_sin        : 9.06%
+dir_cos        : 8.95%
+U_at_z         : 7.51%
+Y_local        : 6.26%
+X_local        : 5.57%
+
+Epoch 510 Importance
+------------------------------
+Bldg_height    : 35.13%
+SDF            : 16.51%
+Z_relative     : 11.04%
+dir_sin        : 9.08%
+dir_cos        : 8.97%
+U_at_z         : 7.51%
+Y_local        : 6.23%
+X_local        : 5.53%
+
+Epoch 520 Importance
+------------------------------
+Bldg_height    : 35.15%
+SDF            : 16.51%
+Z_relative     : 11.06%
+dir_sin        : 9.10%
+dir_cos        : 8.99%
+U_at_z         : 7.52%
+Y_local        : 6.19%
+X_local        : 5.49%
+
+Epoch 530 Importance
+------------------------------
+Bldg_height    : 35.18%
+SDF            : 16.51%
+Z_relative     : 11.06%
+dir_sin        : 9.11%
+dir_cos        : 9.01%
+U_at_z         : 7.52%
+Y_local        : 6.15%
+X_local        : 5.45%
+
+Epoch 540 Importance
+------------------------------
+Bldg_height    : 35.19%
+SDF            : 16.52%
+Z_relative     : 11.07%
+dir_sin        : 9.13%
+dir_cos        : 9.03%
+U_at_z         : 7.52%
+Y_local        : 6.11%
+X_local        : 5.41%
+
+Epoch 550 Importance
+------------------------------
+Bldg_height    : 35.20%
+SDF            : 16.54%
+Z_relative     : 11.09%
+dir_sin        : 9.16%
+dir_cos        : 9.05%
+U_at_z         : 7.53%
+Y_local        : 6.07%
+X_local        : 5.37%
+
+Epoch 560 Importance
+------------------------------
+Bldg_height    : 35.23%
+SDF            : 16.54%
+Z_relative     : 11.09%
+dir_sin        : 9.17%
+dir_cos        : 9.06%
+U_at_z         : 7.53%
+Y_local        : 6.04%
+X_local        : 5.33%
+
+Epoch 570 Importance
+------------------------------
+Bldg_height    : 35.26%
+SDF            : 16.55%
+Z_relative     : 11.10%
+dir_sin        : 9.17%
+dir_cos        : 9.06%
+U_at_z         : 7.53%
+Y_local        : 6.01%
+X_local        : 5.30%
+
+Epoch 580 Importance
+------------------------------
+Bldg_height    : 35.28%
+SDF            : 16.56%
+Z_relative     : 11.10%
+dir_sin        : 9.19%
+dir_cos        : 9.08%
+U_at_z         : 7.54%
+Y_local        : 5.98%
+X_local        : 5.27%
+
+Epoch 590 Importance
+------------------------------
+Bldg_height    : 35.29%
+SDF            : 16.57%
+Z_relative     : 11.11%
+dir_sin        : 9.21%
+dir_cos        : 9.10%
+U_at_z         : 7.54%
+Y_local        : 5.95%
+X_local        : 5.24%
+
+Epoch 600 Importance
+------------------------------
+Bldg_height    : 35.29%
+SDF            : 16.59%
+Z_relative     : 11.12%
+dir_sin        : 9.22%
+dir_cos        : 9.11%
+U_at_z         : 7.54%
+Y_local        : 5.93%
+X_local        : 5.21%
+
+Epoch 610 Importance
+------------------------------
+Bldg_height    : 35.35%
+SDF            : 16.57%
+Z_relative     : 11.11%
+dir_sin        : 9.22%
+dir_cos        : 9.12%
+U_at_z         : 7.54%
+Y_local        : 5.91%
+X_local        : 5.18%
+
+Epoch 620 Importance
+------------------------------
+Bldg_height    : 35.41%
+SDF            : 16.54%
+Z_relative     : 11.11%
+dir_sin        : 9.23%
+dir_cos        : 9.13%
+U_at_z         : 7.54%
+Y_local        : 5.88%
+X_local        : 5.16%
+
+Epoch 630 Importance
+------------------------------
+Bldg_height    : 35.45%
+SDF            : 16.52%
+Z_relative     : 11.11%
+dir_sin        : 9.24%
+dir_cos        : 9.14%
+U_at_z         : 7.54%
+Y_local        : 5.86%
+X_local        : 5.13%
+
+Epoch 640 Importance
+------------------------------
+Bldg_height    : 35.49%
+SDF            : 16.51%
+Z_relative     : 11.11%
+dir_sin        : 9.25%
+dir_cos        : 9.16%
+U_at_z         : 7.54%
+Y_local        : 5.83%
+X_local        : 5.10%
+
+Epoch 650 Importance
+------------------------------
+Bldg_height    : 35.52%
+SDF            : 16.50%
+Z_relative     : 11.12%
+dir_sin        : 9.26%
+dir_cos        : 9.17%
+U_at_z         : 7.55%
+Y_local        : 5.81%
+X_local        : 5.08%
+
+Epoch 660 Importance
+------------------------------
+Bldg_height    : 35.56%
+SDF            : 16.49%
+Z_relative     : 11.12%
+dir_sin        : 9.27%
+dir_cos        : 9.18%
+U_at_z         : 7.55%
+Y_local        : 5.78%
+X_local        : 5.05%
+
+Epoch 670 Importance
+------------------------------
+Bldg_height    : 35.59%
+SDF            : 16.48%
+Z_relative     : 11.12%
+dir_sin        : 9.28%
+dir_cos        : 9.19%
+U_at_z         : 7.55%
+Y_local        : 5.76%
+X_local        : 5.03%
+
+Epoch 680 Importance
+------------------------------
+Bldg_height    : 35.66%
+SDF            : 16.47%
+Z_relative     : 11.11%
+dir_sin        : 9.27%
+dir_cos        : 9.19%
+U_at_z         : 7.55%
+Y_local        : 5.74%
+X_local        : 5.01%
+
+Epoch 690 Importance
+------------------------------
+Bldg_height    : 35.68%
+SDF            : 16.47%
+Z_relative     : 11.12%
+dir_sin        : 9.28%
+dir_cos        : 9.20%
+U_at_z         : 7.55%
+Y_local        : 5.72%
+X_local        : 4.99%
+
+Epoch 700 Importance
+------------------------------
+Bldg_height    : 35.72%
+SDF            : 16.45%
+Z_relative     : 11.11%
+dir_sin        : 9.29%
+dir_cos        : 9.21%
+U_at_z         : 7.55%
+Y_local        : 5.70%
+X_local        : 4.97%
+
+Epoch 710 Importance
+------------------------------
+Bldg_height    : 35.74%
+SDF            : 16.45%
+Z_relative     : 11.12%
+dir_sin        : 9.30%
+dir_cos        : 9.22%
+U_at_z         : 7.55%
+Y_local        : 5.68%
+X_local        : 4.95%
+
+Epoch 720 Importance
+------------------------------
+Bldg_height    : 35.77%
+SDF            : 16.45%
+Z_relative     : 11.12%
+dir_sin        : 9.30%
+dir_cos        : 9.23%
+U_at_z         : 7.55%
+Y_local        : 5.66%
+X_local        : 4.93%
+
+Epoch 730 Importance
+------------------------------
+Bldg_height    : 35.79%
+SDF            : 16.44%
+Z_relative     : 11.12%
+dir_sin        : 9.30%
+dir_cos        : 9.24%
+U_at_z         : 7.55%
+Y_local        : 5.65%
+X_local        : 4.91%
+
+Epoch 740 Importance
+------------------------------
+Bldg_height    : 35.82%
+SDF            : 16.43%
+Z_relative     : 11.12%
+dir_sin        : 9.31%
+dir_cos        : 9.25%
+U_at_z         : 7.55%
+Y_local        : 5.63%
+X_local        : 4.89%
+
+Epoch 750 Importance
+------------------------------
+Bldg_height    : 35.83%
+SDF            : 16.43%
+Z_relative     : 11.12%
+dir_sin        : 9.32%
+dir_cos        : 9.26%
+U_at_z         : 7.55%
+Y_local        : 5.62%
+X_local        : 4.88%
+
+Epoch 760 Importance
+------------------------------
+Bldg_height    : 35.86%
+SDF            : 16.43%
+Z_relative     : 11.12%
+dir_sin        : 9.32%
+dir_cos        : 9.27%
+U_at_z         : 7.55%
+Y_local        : 5.60%
+X_local        : 4.86%
+
+Epoch 770 Importance
+------------------------------
+Bldg_height    : 35.88%
+SDF            : 16.42%
+Z_relative     : 11.12%
+dir_sin        : 9.33%
+dir_cos        : 9.27%
+U_at_z         : 7.55%
+Y_local        : 5.58%
+X_local        : 4.84%
+
+Epoch 780 Importance
+------------------------------
+Bldg_height    : 35.91%
+SDF            : 16.42%
+Z_relative     : 11.12%
+dir_sin        : 9.33%
+dir_cos        : 9.28%
+U_at_z         : 7.54%
+Y_local        : 5.57%
+X_local        : 4.83%
+
+Epoch 10 Importance
+------------------------------
+X_local        : 13.22%
+Bldg_height    : 13.20%
+Y_local        : 13.05%
+U_at_z         : 12.93%
+Z_relative     : 12.68%
+SDF            : 11.93%
+dir_sin        : 11.55%
+dir_cos        : 11.45%
+
+Epoch 100 Importance
+------------------------------
+Bldg_height    : 41.38%
+SDF            : 11.81%
+Y_local        : 8.01%
+Z_relative     : 7.98%
+dir_sin        : 7.88%
+dir_cos        : 7.72%
+U_at_z         : 7.69%
+X_local        : 7.52%
+
+Epoch 200 Importance
+------------------------------
+Bldg_height    : 42.91%
+SDF            : 14.33%
+Z_relative     : 8.71%
+U_at_z         : 8.04%
+Y_local        : 7.01%
+dir_sin        : 6.42%
+dir_cos        : 6.30%
+X_local        : 6.28%
+
+Final Importance
+------------------------------
+Bldg_height    : 42.91%
+SDF            : 14.33%
+Z_relative     : 8.71%
+U_at_z         : 8.04%
+Y_local        : 7.01%
+dir_sin        : 6.42%
+dir_cos        : 6.30%
+X_local        : 6.28%
+
+Epoch 100 Importance
+------------------------------
+Bldg_height    : 21.56%
+X_local        : 13.71%
+SDF            : 13.31%
+Y_local        : 13.21%
+U_at_z         : 10.63%
+dir_sin        : 10.26%
+dir_cos        : 9.63%
+Z_relative     : 7.68%
+
+Epoch 200 Importance
+------------------------------
+Bldg_height    : 23.41%
+X_local        : 14.13%
+SDF            : 13.67%
+Y_local        : 13.41%
+U_at_z         : 10.73%
+dir_sin        : 9.86%
+dir_cos        : 8.93%
+Z_relative     : 5.87%
+
+Final Importance
+------------------------------
+Bldg_height    : 23.41%
+X_local        : 14.13%
+SDF            : 13.67%
+Y_local        : 13.41%
+U_at_z         : 10.73%
+dir_sin        : 9.86%
+dir_cos        : 8.93%
+Z_relative     : 5.87%
+
+Epoch 100 Importance
+------------------------------
+Bldg_height    : 27.44%
+SDF            : 11.48%
+X_local        : 11.05%
+Y_local        : 10.53%
+dir_sin        : 10.17%
+U_at_z         : 9.95%
+Z_relative     : 9.93%
+dir_cos        : 9.45%
+
+Epoch 200 Importance
+------------------------------
+Bldg_height    : 33.00%
+SDF            : 11.94%
+U_at_z         : 10.38%
+X_local        : 10.16%
+Y_local        : 9.67%
+dir_sin        : 9.24%
+dir_cos        : 8.47%
+Z_relative     : 7.13%
+
+Final Importance
+------------------------------
+Bldg_height    : 33.00%
+SDF            : 11.94%
+U_at_z         : 10.38%
+X_local        : 10.16%
+Y_local        : 9.67%
+dir_sin        : 9.24%
+dir_cos        : 8.47%
+Z_relative     : 7.13%
+
+Epoch 100 Importance
+------------------------------
+Bldg_height    : 31.79%
+dir_cos        : 11.26%
+U_at_z         : 11.12%
+SDF            : 10.63%
+X_local        : 9.13%
+Z_relative     : 9.02%
+Y_local        : 8.56%
+dir_sin        : 8.48%
+
+Epoch 200 Importance
+------------------------------
+Bldg_height    : 41.71%
+U_at_z         : 11.11%
+dir_cos        : 8.81%
+SDF            : 8.50%
+Z_relative     : 8.37%
+dir_sin        : 8.18%
+X_local        : 6.76%
+Y_local        : 6.57%
+
+Final Importance
+------------------------------
+Bldg_height    : 41.71%
+U_at_z         : 11.11%
+dir_cos        : 8.81%
+SDF            : 8.50%
+Z_relative     : 8.37%
+dir_sin        : 8.18%
+X_local        : 6.76%
+Y_local        : 6.57%
+
+Epoch 100 Importance
+------------------------------
+Bldg_height    : 30.12%
+Z_relative     : 10.80%
+dir_sin        : 10.59%
+X_local        : 10.24%
+dir_cos        : 10.09%
+U_at_z         : 10.04%
+Y_local        : 9.30%
+SDF            : 8.83%
+
+Epoch 200 Importance
+------------------------------
+Bldg_height    : 38.41%
+Z_relative     : 10.22%
+U_at_z         : 10.22%
+dir_cos        : 9.56%
+dir_sin        : 9.03%
+SDF            : 8.97%
+Y_local        : 7.27%
+X_local        : 6.32%
+
+Epoch 300 Importance
+------------------------------
+Bldg_height    : 40.55%
+dir_cos        : 10.83%
+SDF            : 10.41%
+dir_sin        : 9.95%
+U_at_z         : 9.64%
+Y_local        : 7.23%
+X_local        : 5.73%
+Z_relative     : 5.66%
+
+Epoch 400 Importance
+------------------------------
+Bldg_height    : 39.73%
+dir_cos        : 11.91%
+SDF            : 11.44%
+dir_sin        : 11.07%
+U_at_z         : 9.34%
+Y_local        : 6.81%
+X_local        : 5.47%
+Z_relative     : 4.23%
+
+Epoch 500 Importance
+------------------------------
+Bldg_height    : 38.22%
+SDF            : 12.56%
+dir_cos        : 12.32%
+dir_sin        : 11.59%
+U_at_z         : 9.20%
+Y_local        : 6.61%
+X_local        : 5.46%
+Z_relative     : 4.05%
+
+Final Importance
+------------------------------
+Bldg_height    : 38.22%
+SDF            : 12.56%
+dir_cos        : 12.32%
+dir_sin        : 11.59%
+U_at_z         : 9.20%
+Y_local        : 6.61%
+X_local        : 5.46%
+Z_relative     : 4.05%
+
+Epoch 100 Importance
+------------------------------
+Bldg_height    : 26.34%
+dir_sin        : 11.31%
+X_local        : 11.10%
+U_at_z         : 11.02%
+Y_local        : 10.70%
+dir_cos        : 10.48%
+Z_relative     : 10.48%
+SDF            : 8.58%
+
+Epoch 200 Importance
+------------------------------
+Bldg_height    : 38.51%
+U_at_z         : 10.65%
+dir_sin        : 9.85%
+Z_relative     : 9.64%
+dir_cos        : 9.42%
+SDF            : 8.36%
+Y_local        : 6.80%
+X_local        : 6.78%
