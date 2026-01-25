@@ -1,0 +1,28 @@
+# FNO Training Configuration
+# Edit this file to customize training parameters
+
+[paths]
+# Path to training CSV files (can be absolute or relative)
+data_folder = "train_csv"
+
+# Path to test CSV files for inference
+test_folder = "test_csv"
+
+# Output model filename
+model_output = "fno_mag_weights.pth"
+
+[training]
+batch_size = 4
+epochs = 200
+learning_rate = 0.001
+patience = 50  # Early stopping patience
+
+[model]
+modes1 = 32
+modes2 = 32
+width = 64
+n_layers = 5
+
+[performance]
+# Number of parallel workers for data loading (0 = auto-detect)
+num_workers = 0

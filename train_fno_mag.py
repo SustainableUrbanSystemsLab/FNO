@@ -5,12 +5,34 @@ from torch.utils.data import DataLoader, TensorDataset
 from fno2d_model import FNO2d, sensor_weighted_mse
 from gh_to_fno import build_input_tensor_from_gh
 
+# ============ Load Configuration ============
+CONFIG_FILE = "config.toml"
 
-DATA_FOLDER = r"C:\LabShare\Dataset\FormFluxCases\Compressed\Training_Dataset"
-MODEL_OUT = "fno_mag_weights.pth"
+def load_config():
+    """Load configuration from config.toml file."""
+    import tomllib  # Python 3.11+ built-in
+    
+    config_path = os.path.join(os.path.dirname(__file__), CONFIG_FILE)
+    if os.path.exists(config_path):
+        with open(config_path, 'rb') as f:
+            return tomllib.load(f)
+    else:
+        print(f"Warning: {CONFIG_FILE} not found, using defaults")
+        return {}
+
+config = load_config()
+
+# ============ Configuration from file ============
+DATA_FOLDER = config.get('paths', {}).get('data_folder', 'train_csv')
+MODEL_OUT = config.get('paths', {}).get('model_output', 'fno_mag_weights.pth')
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-BATCH = 4; EPOCHS = 200; LR = 1e-3
-MODES1=32; MODES2=32; WIDTH=64; N_LAYERS=5
+BATCH = config.get('training', {}).get('batch_size', 4)
+EPOCHS = config.get('training', {}).get('epochs', 200)
+LR = config.get('training', {}).get('learning_rate', 1e-3)
+MODES1 = config.get('model', {}).get('modes1', 32)
+MODES2 = config.get('model', {}).get('modes2', 32)
+WIDTH = config.get('model', {}).get('width', 64)
+N_LAYERS = config.get('model', {}).get('n_layers', 5)
 FORCE_H = None; FORCE_W = None
 
 def infer_grid(xs, ys, tol=1e-6):

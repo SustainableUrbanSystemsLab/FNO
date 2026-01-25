@@ -2,7 +2,7 @@
 # Usage: torchrun --nproc_per_node=2 train_fno_distributed.py
 #    or: python train_fno_distributed.py (falls back to single GPU)
 
-import os, glob, numpy as np, pandas as pd, torch, hashlib, pickle
+import os, glob, numpy as np, pandas as pd, torch, hashlib, pickle, sys
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, TensorDataset
@@ -12,18 +12,42 @@ from multiprocessing import Pool, cpu_count
 from fno2d_model import FNO2d, sensor_weighted_mse
 from gh_to_fno import build_input_tensor_from_gh
 
-# ============ Configuration ============
-DATA_FOLDER = r"C:\LabShare\Dataset\FormFluxCases\Compressed\Training_Dataset"
-MODEL_OUT = "fno_mag_weights.pth"
+# ============ Load Configuration ============
+CONFIG_FILE = "config.toml"
+
+def load_config():
+    """Load configuration from config.toml file."""
+    import tomllib  # Python 3.11+ built-in
+    
+    config_path = os.path.join(os.path.dirname(__file__), CONFIG_FILE)
+    if os.path.exists(config_path):
+        with open(config_path, 'rb') as f:
+            return tomllib.load(f)
+    else:
+        print(f"Warning: {CONFIG_FILE} not found, using defaults")
+        return {}
+
+config = load_config()
+
+# ============ Configuration from file ============
+DATA_FOLDER = config.get('paths', {}).get('data_folder', 'train_csv')
+MODEL_OUT = config.get('paths', {}).get('model_output', 'fno_mag_weights.pth')
 CACHE_FILE = "dataset_cache.pkl"
-BATCH = 4  # Per-GPU batch size
-EPOCHS = 200
-LR = 1e-3
-MODES1 = 32; MODES2 = 32; WIDTH = 64; N_LAYERS = 5
+BATCH = config.get('training', {}).get('batch_size', 4)
+EPOCHS = config.get('training', {}).get('epochs', 200)
+LR = config.get('training', {}).get('learning_rate', 1e-3)
+PATIENCE = config.get('training', {}).get('patience', 50)
+MODES1 = config.get('model', {}).get('modes1', 32)
+MODES2 = config.get('model', {}).get('modes2', 32)
+WIDTH = config.get('model', {}).get('width', 64)
+N_LAYERS = config.get('model', {}).get('n_layers', 5)
 FORCE_H = None; FORCE_W = None
-import sys
-# Windows has a limit on multiprocessing handles, cap at 8; Linux can use more
-if sys.platform == 'win32':
+
+# Worker count from config (0 = auto-detect)
+_configured_workers = config.get('performance', {}).get('num_workers', 0)
+if _configured_workers > 0:
+    NUM_WORKERS = _configured_workers
+elif sys.platform == 'win32':
     NUM_WORKERS = min(8, max(1, cpu_count() // 2))
 else:
     NUM_WORKERS = max(1, cpu_count() // 2)
