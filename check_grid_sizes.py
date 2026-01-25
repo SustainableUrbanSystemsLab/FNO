@@ -9,6 +9,7 @@ import glob
 import pandas as pd
 from collections import Counter
 import tomllib
+from tqdm import tqdm
 
 # Load config
 config_path = os.path.join(os.path.dirname(__file__), "config.toml")
@@ -54,7 +55,7 @@ def main():
     size_to_files = {}
     errors = []
     
-    for fp in csv_files:
+    for fp in tqdm(csv_files, desc="Scanning CSVs", unit="file"):
         size, error = get_grid_size(fp)
         if error:
             errors.append((fp, error))
