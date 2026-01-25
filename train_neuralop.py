@@ -249,6 +249,36 @@ class CSVDataset(Dataset):
         return X, Y, mask
 
 
+def pad_collate_fn(batch):
+    """Custom collate function that pads tensors to the largest size in the batch."""
+    Xs, Ys, Masks = zip(*batch)
+    
+    # Find max dimensions in this batch
+    max_h = max(x.shape[1] for x in Xs)
+    max_w = max(x.shape[2] for x in Xs)
+    
+    # Pad to max size
+    padded_Xs = []
+    padded_Ys = []
+    padded_Masks = []
+    
+    for x, y, m in zip(Xs, Ys, Masks):
+        _, h, w = x.shape
+        pad_h = max_h - h
+        pad_w = max_w - w
+        
+        # Pad: (left, right, top, bottom)
+        if pad_h > 0 or pad_w > 0:
+            x = torch.nn.functional.pad(x, (0, pad_w, 0, pad_h), mode='constant', value=0)
+            y = torch.nn.functional.pad(y, (0, pad_w, 0, pad_h), mode='constant', value=0)
+            m = torch.nn.functional.pad(m, (0, pad_w, 0, pad_h), mode='constant', value=0)
+        
+        padded_Xs.append(x)
+        padded_Ys.append(y)
+        padded_Masks.append(m)
+    
+    return torch.stack(padded_Xs), torch.stack(padded_Ys), torch.stack(padded_Masks)
+
 # ============ Main Training ============
 def main():
     rank, world_size, local_rank, is_distributed = setup_distributed()
@@ -282,9 +312,9 @@ def main():
     
     if is_distributed:
         sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=True)
-        loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, num_workers=0, pin_memory=True)
+        loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, num_workers=0, pin_memory=True, collate_fn=pad_collate_fn)
     else:
-        loader = DataLoader(dataset, batch_size=BATCH, shuffle=True, num_workers=0, pin_memory=True)
+        loader = DataLoader(dataset, batch_size=BATCH, shuffle=True, num_workers=0, pin_memory=True, collate_fn=pad_collate_fn)
     
     # Get input shape from first sample
     sample_x = Xs[0]
