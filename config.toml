@@ -19,10 +19,15 @@ learning_rate = 0.001
 patience = 50  # Early stopping patience
 
 [model]
-modes1 = 32
-modes2 = 32
+modes1 = 48  # Increased from 32 for sharper predictions
+modes2 = 48  # Increased from 32 for sharper predictions
 width = 64
 n_layers = 5
+
+[loss]
+# Loss function weights (MSE is always 1.0)
+gradient_weight = 0.20  # Weight for gradient sharpness loss
+spectral_weight = 0.10  # Weight for FFT spectral loss
 
 [performance]
 # Number of parallel workers for data loading (0 = auto-detect)

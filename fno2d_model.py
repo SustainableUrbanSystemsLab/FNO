@@ -67,8 +67,45 @@ class FNO2d(nn.Module):
         out = self.out_proj(x)
         return out
 
-def physics_loss(pred, target, mask=None, grad_weight=0.15):
-    """Combined MSE, Gradient Loss, and Acceleration Curb.
+def spectral_loss(pred, target, mask=None):
+    """FFT-based loss to preserve high-frequency spatial features.
+    
+    Compares the magnitude of Fourier coefficients between prediction and target,
+    which helps preserve sharp edges and fine-scale flow features.
+    """
+    # Apply mask before FFT to focus on valid regions
+    if mask is not None:
+        pred_masked = pred * mask
+        target_masked = target * mask
+    else:
+        pred_masked = pred
+        target_masked = target
+    
+    # Compute 2D FFT
+    pred_fft = torch.fft.rfft2(pred_masked)
+    target_fft = torch.fft.rfft2(target_masked)
+    
+    # Compare magnitudes (ignoring phase for stability)
+    pred_mag = pred_fft.abs()
+    target_mag = target_fft.abs()
+    
+    # Log-scale to balance low and high frequencies
+    # Add small epsilon for numerical stability
+    pred_log = torch.log1p(pred_mag)
+    target_log = torch.log1p(target_mag)
+    
+    return F.mse_loss(pred_log, target_log)
+
+
+def physics_loss(pred, target, mask=None, grad_weight=0.15, spectral_weight=0.05):
+    """Combined MSE, Gradient Loss, Spectral Loss, and Acceleration Curb.
+    
+    Args:
+        pred: Predicted field (B, C, H, W)
+        target: Target field (B, C, H, W)
+        mask: Optional weight mask (B, C, H, W)
+        grad_weight: Weight for gradient loss (default 0.15)
+        spectral_weight: Weight for spectral/FFT loss (default 0.05)
     """
     # 1. Main Weighted MSE
     m = mask if mask is not None else torch.ones_like(pred)
@@ -99,8 +136,12 @@ def physics_loss(pred, target, mask=None, grad_weight=0.15):
     
     grad_loss = (((p_dx - t_dx)**2 * m_dx).mean() + ((p_dy - t_dy)**2 * m_dy).mean())
     
-    return mse + grad_weight * grad_loss
+    # 3. Spectral Loss (preserve high-frequency features)
+    spec_loss = spectral_loss(pred, target, mask) if spectral_weight > 0 else 0.0
+    
+    return mse + grad_weight * grad_loss + spectral_weight * spec_loss
 
-def sensor_weighted_mse(pred, target, sensor_mask=None):
-    # Backward compatibility
-    return physics_loss(pred, target, sensor_mask)
+
+def sensor_weighted_mse(pred, target, sensor_mask=None, grad_weight=0.15, spectral_weight=0.05):
+    """Backward compatible wrapper with configurable loss weights."""
+    return physics_loss(pred, target, sensor_mask, grad_weight, spectral_weight)

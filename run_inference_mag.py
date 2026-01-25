@@ -34,7 +34,7 @@ for CSV in tqdm(files, desc="Batch Inference"):
         rename_map = {'X': 'X_coords', 'Y': 'Y_coords', 'x': 'X_coords', 'y': 'Y_coords'}
         df.rename(columns=rename_map, inplace=True)
 
-        cols = ['SDF','Bldg_height','Z_relative','U_at_z','X_coords','Y_coords','dir_sin','dir_cos']
+        cols = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_coords','Y_coords','dir_sin','dir_cos']
         for c in cols:
             if c not in df.columns:
                 raise RuntimeError(f"Missing input column {c} in {CSV}")
@@ -92,9 +92,9 @@ for CSV in tqdm(files, desc="Batch Inference"):
         # 0.97 = 3% reduction in final speed to compensate for overshoot
         SPEED_TUNE_FACTOR = 0.97 
         
-        # ✅ Reconstruct explicitly: U = U_at_z * (1 + delta)
-        u_at_z_series = df['U_at_z'].to_numpy()
-        mag_U_final = u_at_z_series * (1.0 + flat) * SPEED_TUNE_FACTOR
+        # ✅ Reconstruct explicitly: U = U_over_Uref * (1 + delta)
+        u_over_uref_series = df['U_over_Uref'].to_numpy()
+        mag_U_final = u_over_uref_series * (1.0 + flat) * SPEED_TUNE_FACTOR
         
         df['mag_U'] = np.round(mag_U_final, ROUND)
         if 'U_ref' in df.columns:

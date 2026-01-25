@@ -19,7 +19,7 @@ def infer_grid_from_coords_simple(xs, ys, tol=1e-6):
     return nx, ny, xs_sorted_vals, ys_sorted_vals, idx_map
 
 def build_input_tensor_from_gh(gh_outputs, H=None, W=None, include_U_ref_channel=False, U_ref_scalar=None, dtype=np.float32, device='cpu'):
-    required = ['SDF','Bldg_height','Z_relative','U_at_z','X_coords','Y_coords','dir_sin','dir_cos']
+    required = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_coords','Y_coords','dir_sin','dir_cos']
     for k in required:
         if k not in gh_outputs:
             raise ValueError(f"Missing GH output '{k}'")
@@ -49,14 +49,14 @@ def build_input_tensor_from_gh(gh_outputs, H=None, W=None, include_U_ref_channel
         x_center, y_center = np.mean(xs), np.mean(ys)
 
     # 3. Channel Population
-    ch_names = ['SDF','Bldg_height','Z_relative','U_at_z','X_local','Y_local','dir_sin','dir_cos']
+    ch_names = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_local','Y_local','dir_sin','dir_cos']
     channels = [np.zeros((ny, nx), dtype=dtype) for _ in ch_names]
     
     for pt_idx, (iy, ix) in enumerate(idx_map):
         channels[0][iy, ix] = float(gh_outputs['SDF'][pt_idx])
         channels[1][iy, ix] = hs[pt_idx]
         channels[2][iy, ix] = float(gh_outputs['Z_relative'][pt_idx])
-        channels[3][iy, ix] = float(gh_outputs['U_at_z'][pt_idx])
+        channels[3][iy, ix] = float(gh_outputs['U_over_Uref'][pt_idx])
         channels[4][iy, ix] = xs[pt_idx] - x_center
         channels[5][iy, ix] = ys[pt_idx] - y_center
         channels[6][iy, ix] = float(gh_outputs['dir_sin'][pt_idx]) 
@@ -70,8 +70,8 @@ def build_input_tensor_from_gh(gh_outputs, H=None, W=None, include_U_ref_channel
     channels[4] /= 500.0   # X_local (-500 to 500 -> -1.0 to 1.0)
     channels[5] /= 500.0   # Y_local (-500 to 500 -> -1.0 to 1.0)
 
-    # Note: U_at_z is usually 0.1 to 1.0. We'll give it a slight boost to help the Conv1x1.
-    channels[3] *= 2.0     # U_at_z boost
+    # Note: U_over_Uref is usually 0.1 to 1.0. We'll give it a slight boost to help the Conv1x1.
+    channels[3] *= 2.0     # U_over_Uref boost
     
     # Wind direction components are already -1.0 to 1.0
     channels[6] *= 1.0     # dir_sin

@@ -46,6 +46,8 @@ MODES1 = config.get('model', {}).get('modes1', 32)
 MODES2 = config.get('model', {}).get('modes2', 32)
 WIDTH = config.get('model', {}).get('width', 64)
 N_LAYERS = config.get('model', {}).get('n_layers', 5)
+GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.15)
+SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
 FORCE_H = None; FORCE_W = None
 
 # Worker count from config (0 = auto-detect)
@@ -96,7 +98,7 @@ def process_single_file(fp):
         rename_map = {'X': 'X_coords', 'Y': 'Y_coords', 'x': 'X_coords', 'y': 'Y_coords'}
         df.rename(columns=rename_map, inplace=True)
 
-        cols = ['SDF','Bldg_height','Z_relative','U_at_z','X_coords','Y_coords','dir_sin','dir_cos']
+        cols = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_coords','Y_coords','dir_sin','dir_cos']
         if any(c not in df.columns for c in cols):
             return None, f"{fp} missing input columns"
         
@@ -128,7 +130,7 @@ def process_single_file(fp):
         
         for i, (iy, ix) in enumerate(idx_map):
             val = mag_vals[i]
-            u_at_z_val = float(df['U_at_z'].iloc[i])
+            u_over_uref_val = float(df['U_over_Uref'].iloc[i])
             
             if not np.isfinite(val):
                 val = 0.0
@@ -136,7 +138,7 @@ def process_single_file(fp):
             else:
                 valid_val = 1.0
             
-            delta_u_normalized = (val - u_at_z_val) / (u_at_z_val + 1e-6)
+            delta_u_normalized = (val - u_over_uref_val) / (u_over_uref_val + 1e-6)
             delta_u_normalized = np.clip(delta_u_normalized, -1.0, 0.5)
             Y_grid[0, iy, ix] = float(delta_u_normalized)
             
@@ -322,7 +324,7 @@ def main():
             mb = mb.float().to(device)
             
             pred = model(xb)
-            loss = sensor_weighted_mse(pred, yb, sensor_mask=mb)
+            loss = sensor_weighted_mse(pred, yb, sensor_mask=mb, grad_weight=GRAD_WEIGHT, spectral_weight=SPECTRAL_WEIGHT)
             opt.zero_grad()
             loss.backward()
             opt.step()

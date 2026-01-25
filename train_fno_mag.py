@@ -39,6 +39,8 @@ MODES1 = config.get('model', {}).get('modes1', 32)
 MODES2 = config.get('model', {}).get('modes2', 32)
 WIDTH = config.get('model', {}).get('width', 64)
 N_LAYERS = config.get('model', {}).get('n_layers', 5)
+GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.15)
+SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
 FORCE_H = None; FORCE_W = None
 
 def infer_grid(xs, ys, tol=1e-6):
@@ -81,7 +83,7 @@ for fp in tqdm(files, desc="Data Preparation"):
     rename_map = {'X': 'X_coords', 'Y': 'Y_coords', 'x': 'X_coords', 'y': 'Y_coords'}
     df.rename(columns=rename_map, inplace=True)
 
-    cols = ['SDF','Bldg_height','Z_relative','U_at_z','X_coords','Y_coords','dir_sin','dir_cos']
+    cols = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_coords','Y_coords','dir_sin','dir_cos']
     if any(c not in df.columns for c in cols):
         raise RuntimeError(fp + " missing input columns")
     infer = infer_grid(df['X_coords'].to_numpy(), df['Y_coords'].to_numpy())
@@ -117,7 +119,7 @@ for fp in tqdm(files, desc="Data Preparation"):
     mask_grid = np.zeros((1, ny, nx), dtype=np.float32)
     for i,(iy,ix) in enumerate(idx_map):
         val = mag_vals[i]
-        u_at_z_val = float(df['U_at_z'].iloc[i])
+        u_over_uref_val = float(df['U_over_Uref'].iloc[i])
         
         # ✅ Precision Enhancement: Interior Punishment
         # We don't just 'mask' buildings (weight=0). We 'punish' the model if it 
@@ -129,7 +131,7 @@ for fp in tqdm(files, desc="Data Preparation"):
             valid_val = 1.0
         
         # Target: Deficit relative to local inlet profile
-        delta_u_normalized = (val - u_at_z_val) / (u_at_z_val + 1e-6)
+        delta_u_normalized = (val - u_over_uref_val) / (u_over_uref_val + 1e-6)
         delta_u_normalized = np.clip(delta_u_normalized, -1.0, 0.5)
         
         Y_grid[0, iy, ix] = float(delta_u_normalized)
@@ -222,7 +224,7 @@ for epoch in range(1, EPOCHS+1):
     for xb, yb, mb in pbar:
         xb = xb.float(); yb = yb.float(); mb = mb.float()
         pred = model(xb)
-        loss = sensor_weighted_mse(pred, yb, sensor_mask=mb)
+        loss = sensor_weighted_mse(pred, yb, sensor_mask=mb, grad_weight=GRAD_WEIGHT, spectral_weight=SPECTRAL_WEIGHT)
         opt.zero_grad(); loss.backward(); opt.step()
         running += float(loss.item()) * xb.shape[0]
         pbar.set_postfix({"loss": f"{loss.item():.4e}"})
