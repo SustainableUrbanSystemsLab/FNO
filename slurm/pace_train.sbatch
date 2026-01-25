@@ -15,30 +15,30 @@ echo "Job started on $(date)"
 echo "Running on node $(hostname)"
 echo "Number of GPUs: ${NUM_GPUS:-1}"
 
-# Load python module or use system python if uv handles it
-module load anaconda3/2023.09 2>/dev/null || echo "Module load failed, continuing with system python..."
-
-# Go to project root (one level up from slurm/)
-cd ..
+# Go to the directory where sbatch was submitted from
+cd $SLURM_SUBMIT_DIR
 
 # Ensure logs directory exists
 mkdir -p logs
 
-# Setup/Ensure environment
-if [ ! -d ".venv" ]; then
-    echo "Virtual environment not found. Running setup..."
-    bash slurm/pace_setup.sh
+# Install uv if not available
+if ! command -v uv &> /dev/null; then
+    echo "Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
 fi
 
-source .venv/bin/activate
+# Sync dependencies
+echo "Syncing dependencies with uv..."
+uv sync
 
 # Execute training based on GPU count
 if [ "${NUM_GPUS:-1}" -gt 1 ]; then
     echo "Starting DISTRIBUTED training with ${NUM_GPUS} GPUs..."
-    torchrun --nproc_per_node=${NUM_GPUS} train_fno_distributed.py
+    uv run torchrun --nproc_per_node=${NUM_GPUS} train_fno_distributed.py
 else
     echo "Starting SINGLE-GPU training..."
-    python train_fno_mag.py
+    uv run python train_fno_distributed.py
 fi
 
 echo "Job finished on $(date)"
