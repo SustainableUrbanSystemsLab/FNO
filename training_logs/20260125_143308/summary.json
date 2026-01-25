@@ -1,0 +1,31 @@
+{
+  "experiment_name": "20260125_143308",
+  "training_completed": "2026-01-25T15:14:47.306680",
+  "total_training_time_seconds": 2499.3,
+  "total_training_time_hours": 0.69,
+  "total_epochs": 140,
+  "final_loss": 0.09434197235107422,
+  "best_loss": 0.09339613342285157,
+  "best_epoch": 91,
+  "final_metrics": {
+    "best_loss": 0.09339613342285157
+  },
+  "config": {
+    "batch_size": 4,
+    "learning_rate": 0.001,
+    "epochs": 200,
+    "modes": [
+      48,
+      48
+    ],
+    "width": 64,
+    "n_layers": 5,
+    "gradient_weight": 0.2,
+    "spectral_weight": 0.1
+  },
+  "model_info": {
+    "total_parameters": 94565505,
+    "trainable_parameters": 94565505,
+    "parameter_count_millions": 94.57
+  }
+}

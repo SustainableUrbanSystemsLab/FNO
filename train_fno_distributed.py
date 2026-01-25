@@ -358,6 +358,10 @@ def main():
         
         # Aggregate loss across GPUs
         if is_distributed:
+            # Sync GPUs before collective operation to prevent timeout
+            torch.cuda.synchronize()
+            dist.barrier()
+            
             running_tensor = torch.tensor([running], device=device)
             dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
             running = running_tensor.item()

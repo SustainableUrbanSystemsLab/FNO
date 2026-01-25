@@ -1,0 +1,22 @@
+{
+  "batch_size": 4,
+  "epochs": 200,
+  "learning_rate": 0.001,
+  "patience": 50,
+  "modes1": 48,
+  "modes2": 48,
+  "width": 64,
+  "n_layers": 5,
+  "gradient_weight": 0.2,
+  "spectral_weight": 0.1,
+  "dataset_size": 2000,
+  "distributed": true,
+  "world_size": 2,
+  "model_info": {
+    "total_parameters": 94565505,
+    "trainable_parameters": 94565505,
+    "parameter_count_millions": 94.57
+  },
+  "training_started": "2026-01-25T14:33:08.009220",
+  "experiment_name": "20260125_143308"
+}

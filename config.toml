@@ -27,7 +27,7 @@ n_layers = 5
 [loss]
 # Loss function weights (MSE is always 1.0)
 gradient_weight = 0.20  # Weight for gradient sharpness loss
-spectral_weight = 0.10  # Weight for FFT spectral loss
+spectral_weight = 0.05  # Weight for FFT spectral loss (reduced for multi-GPU stability)
 
 [performance]
 # Number of parallel workers for data loading (0 = auto-detect)
