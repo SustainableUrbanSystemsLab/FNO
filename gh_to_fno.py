@@ -19,6 +19,10 @@ def infer_grid_from_coords_simple(xs, ys, tol=1e-6):
     return nx, ny, xs_sorted_vals, ys_sorted_vals, idx_map
 
 def build_input_tensor_from_gh(gh_outputs, H=None, W=None, include_U_ref_channel=False, U_ref_scalar=None, dtype=np.float32, device='cpu'):
+    # Backward compatibility: map U_at_z -> U_over_Uref
+    if 'U_at_z' in gh_outputs and 'U_over_Uref' not in gh_outputs:
+        gh_outputs['U_over_Uref'] = gh_outputs['U_at_z']
+    
     required = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_coords','Y_coords','dir_sin','dir_cos']
     for k in required:
         if k not in gh_outputs:

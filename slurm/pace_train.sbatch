@@ -37,12 +37,9 @@ if [ "${NUM_GPUS:-1}" -gt 1 ]; then
     # Use random port to avoid conflicts on shared nodes
     MASTER_PORT=$((29500 + RANDOM % 1000))
     
-    # NCCL settings for HPC stability
-    export NCCL_TIMEOUT=1800           # 30 minutes timeout (was 10)
-    export NCCL_ASYNC_ERROR_HANDLING=1 # Enable async error handling
-    export NCCL_IB_DISABLE=0           # Enable InfiniBand if available
-    export NCCL_DEBUG=WARN             # Show warnings for debugging
-    export TORCH_NCCL_BLOCKING_WAIT=1  # Use blocking wait for stability
+    # NCCL settings for HPC
+    export NCCL_ASYNC_ERROR_HANDLING=1  # Better error handling
+    export NCCL_IB_DISABLE=0            # Enable InfiniBand if available
     
     echo "Starting DISTRIBUTED training with ${NUM_GPUS} GPUs on port ${MASTER_PORT}..."
     uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_fno_distributed.py

@@ -3,8 +3,31 @@ from tqdm import tqdm
 from gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
 from fno2d_model import FNO2d
 
-TEST_FOLDER = "test_csv"
-MODEL_BASE = "fno_mag_weights.pth"
+# ============ Load Configuration ============
+CONFIG_FILE = "config.toml"
+
+def load_config():
+    """Load configuration from config.toml file."""
+    import tomllib  # Python 3.11+ built-in
+    
+    config_path = os.path.join(os.path.dirname(__file__), CONFIG_FILE)
+    if os.path.exists(config_path):
+        with open(config_path, 'rb') as f:
+            return tomllib.load(f)
+    else:
+        print(f"Warning: {CONFIG_FILE} not found, using defaults")
+        return {}
+
+config = load_config()
+
+# Model architecture from config (must match training!)
+MODES1 = config.get('model', {}).get('modes1', 32)
+MODES2 = config.get('model', {}).get('modes2', 32)
+WIDTH = config.get('model', {}).get('width', 64)
+N_LAYERS = config.get('model', {}).get('n_layers', 5)
+
+TEST_FOLDER = config.get('paths', {}).get('test_folder', 'test_csv')
+MODEL_BASE = config.get('paths', {}).get('model_output', 'fno_mag_weights.pth')
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ROUND = 2
 
@@ -30,8 +53,12 @@ for CSV in tqdm(files, desc="Batch Inference"):
     
     try:
         df = pd.read_csv(CSV)
-        # Renaming known variations
-        rename_map = {'X': 'X_coords', 'Y': 'Y_coords', 'x': 'X_coords', 'y': 'Y_coords'}
+        # Renaming known variations (including backward compat for U_at_z -> U_over_Uref)
+        rename_map = {
+            'X': 'X_coords', 'Y': 'Y_coords', 
+            'x': 'X_coords', 'y': 'Y_coords',
+            'U_at_z': 'U_over_Uref',  # Backward compatibility
+        }
         df.rename(columns=rename_map, inplace=True)
 
         cols = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_coords','Y_coords','dir_sin','dir_cos']
@@ -54,8 +81,8 @@ for CSV in tqdm(files, desc="Batch Inference"):
         if model is None:
             try:
                 in_ch = X.shape[1]
-                # Reverted to Width 64 for sharper boundaries
-                m = FNO2d(in_channels=in_ch, out_channels=1, modes1=32, modes2=32, width=64, n_layers=5).to(DEVICE)
+                # Load architecture from config.toml
+                m = FNO2d(in_channels=in_ch, out_channels=1, modes1=MODES1, modes2=MODES2, width=WIDTH, n_layers=N_LAYERS).to(DEVICE)
                 m.load_state_dict(torch.load(model_path, map_location=DEVICE))
                 m.eval()
                 model = m
@@ -63,7 +90,7 @@ for CSV in tqdm(files, desc="Batch Inference"):
                 if "CUDA out of memory" in str(e) or "out of memory" in str(e):
                     print(f"GPU OOM, falling back to CPU...")
                     DEVICE = "cpu"
-                    m = FNO2d(in_channels=in_ch, out_channels=1, modes1=32, modes2=32, width=64, n_layers=5).to(DEVICE)
+                    m = FNO2d(in_channels=in_ch, out_channels=1, modes1=MODES1, modes2=MODES2, width=WIDTH, n_layers=N_LAYERS).to(DEVICE)
                     m.load_state_dict(torch.load(model_path, map_location=DEVICE))
                     m.eval()
                     model = m
