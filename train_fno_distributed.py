@@ -146,8 +146,17 @@ def process_single_file(fp):
         return None, f"Error processing {fp}: {e}"
 
 def get_cache_hash(files):
-    """Generate a hash based on file list and modification times."""
-    hash_input = "".join([f"{f}_{os.path.getmtime(f)}" for f in files[:100]])  # Sample first 100 for speed
+    """Generate a hash based on file count, folder count, and sample of modification times."""
+    # Include total count and folder structure
+    folders = set(os.path.dirname(f) for f in files)
+    hash_parts = [
+        f"files:{len(files)}",
+        f"folders:{len(folders)}",
+    ]
+    # Sample files for modification times (every 10th file for speed)
+    for f in files[::10]:
+        hash_parts.append(f"{os.path.basename(f)}_{os.path.getmtime(f):.0f}")
+    hash_input = "|".join(hash_parts)
     return hashlib.md5(hash_input.encode()).hexdigest()
 
 def load_or_prepare_dataset(files, rank, is_main):
@@ -245,7 +254,15 @@ def main():
     M_all = pad_to_max(Masks, max_h, max_w)
     
     if is_main_process(rank):
-        print("Dataset shapes", X_all.shape, Y_all.shape, M_all.shape)
+        print("=" * 50)
+        print("DATASET PREPARATION COMPLETE")
+        print("=" * 50)
+        print(f"  Total samples: {len(Xs)}")
+        print(f"  Input shape:   {X_all.shape} (N, C, H, W)")
+        print(f"  Target shape:  {Y_all.shape}")
+        print(f"  Mask shape:    {M_all.shape}")
+        print(f"  Input channels: {chs}")
+        print("=" * 50)
 
     # Create dataset and sampler
     dataset = TensorDataset(X_all, Y_all, M_all)
@@ -256,6 +273,10 @@ def main():
     else:
         loader = DataLoader(dataset, batch_size=BATCH, shuffle=False)
 
+    if is_main_process(rank):
+        print("CREATING MODEL...")
+        print(f"  FNO2d: modes=({MODES1},{MODES2}), width={WIDTH}, layers={N_LAYERS}")
+        
     # Create model
     in_ch = X_all.shape[1]
     model = FNO2d(in_channels=in_ch, out_channels=1, modes1=MODES1, modes2=MODES2, 
@@ -264,12 +285,21 @@ def main():
     if is_distributed:
         model = DDP(model, device_ids=[local_rank])
 
+    if is_main_process(rank):
+        total_params = sum(p.numel() for p in model.parameters())
+        print(f"  Total parameters: {total_params:,}")
+        print("=" * 50)
     
     opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=200, gamma=0.5)
 
+    if is_main_process(rank):
+        print("STARTING TRAINING...")
+        print(f"  Epochs: {EPOCHS}, Batch size: {BATCH}, LR: {LR}")
+        print(f"  Patience: {PATIENCE}, Device: {device}")
+        print("=" * 50)
+
     # Training loop
-    PATIENCE = 50
     best_loss = float('inf')
     patience_counter = 0
 
