@@ -3,10 +3,10 @@
 
 [paths]
 # Path to training CSV files (can be absolute or relative)
-data_folder = "train_csv"
+data_folder = 'C:\LabShare\Dataset\FormFluxCases\Compressed\Training_Dataset'
 
 # Path to test CSV files for inference
-test_folder = "test_csv"
+test_folder = 'test_csv'
 
 # Output model filename
 model_output = "fno_mag_weights.pth"
