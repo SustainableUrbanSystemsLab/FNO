@@ -4,7 +4,7 @@
 [paths]
 # Path to training CSV files (can be absolute or relative)
 # For Windows paths, use forward slashes: "C:/LabShare/..." or single quotes: 'C:\LabShare\...'
-data_folder = "train_csv"
+data_folder = "/storage/coda1/p-pkastner3/0/ikaradag3/FNO/Training_Dataset"
 
 # Path to test CSV files for inference
 test_folder = "test_csv"
