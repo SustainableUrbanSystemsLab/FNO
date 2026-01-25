@@ -3,7 +3,7 @@
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
-#SBATCH --mem=48G
+#SBATCH --mem=128G
 #SBATCH -t 24:00:00
 #SBATCH -o logs/fno_%j.out
 #SBATCH -e logs/fno_%j.err
@@ -34,8 +34,10 @@ uv sync
 
 # Execute training based on GPU count
 if [ "${NUM_GPUS:-1}" -gt 1 ]; then
-    echo "Starting DISTRIBUTED training with ${NUM_GPUS} GPUs..."
-    uv run torchrun --nproc_per_node=${NUM_GPUS} train_fno_distributed.py
+    # Use random port to avoid conflicts on shared nodes
+    MASTER_PORT=$((29500 + RANDOM % 1000))
+    echo "Starting DISTRIBUTED training with ${NUM_GPUS} GPUs on port ${MASTER_PORT}..."
+    uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_fno_distributed.py
 else
     echo "Starting SINGLE-GPU training..."
     uv run python train_fno_distributed.py

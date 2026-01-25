@@ -23,7 +23,13 @@ def load_config():
 config = load_config()
 
 # ============ Configuration from file ============
-DATA_FOLDER = config.get('paths', {}).get('data_folder', 'train_csv')
+import sys
+# Auto-detect platform and use appropriate data folder
+if sys.platform == 'win32':
+    DATA_FOLDER = config.get('paths', {}).get('data_folder_windows', 'train_csv')
+else:
+    DATA_FOLDER = config.get('paths', {}).get('data_folder_linux', 'train_csv')
+
 MODEL_OUT = config.get('paths', {}).get('model_output', 'fno_mag_weights.pth')
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH = config.get('training', {}).get('batch_size', 4)

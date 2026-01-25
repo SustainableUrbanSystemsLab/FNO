@@ -51,7 +51,6 @@ for CSV in tqdm(files, desc="Batch Inference"):
 
         
         # Init model if needed
-        # Init model if needed
         if model is None:
             try:
                 in_ch = X.shape[1]
@@ -60,6 +59,18 @@ for CSV in tqdm(files, desc="Batch Inference"):
                 m.load_state_dict(torch.load(model_path, map_location=DEVICE))
                 m.eval()
                 model = m
+            except RuntimeError as e:
+                if "CUDA out of memory" in str(e) or "out of memory" in str(e):
+                    print(f"GPU OOM, falling back to CPU...")
+                    DEVICE = "cpu"
+                    m = FNO2d(in_channels=in_ch, out_channels=1, modes1=32, modes2=32, width=64, n_layers=5).to(DEVICE)
+                    m.load_state_dict(torch.load(model_path, map_location=DEVICE))
+                    m.eval()
+                    model = m
+                    X = X.to(DEVICE)
+                else:
+                    print(f"Failed to load model: {e}")
+                    break
             except Exception as e:
                 print(f"Failed to load model: {e}")
                 break
