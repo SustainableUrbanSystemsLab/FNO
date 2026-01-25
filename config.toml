@@ -29,5 +29,7 @@ num_workers = 0
 
 [pace]
 # PACE cluster configuration (required for job submission)
-account = ""  # e.g., "gts-ikaradag3" - REQUIRED
-partition = ""  # e.g., "phoenix" (leave empty for default)
+# Set your account, e.g., "gts-ikaradag3"
+account = "gts-ikaradag3"
+# Partition (leave empty for default)
+partition = ""
