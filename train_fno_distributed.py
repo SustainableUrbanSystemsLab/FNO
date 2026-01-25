@@ -11,6 +11,7 @@ from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
 from fno2d_model import FNO2d, sensor_weighted_mse
 from gh_to_fno import build_input_tensor_from_gh
+from training_logger import TrainingLogger
 
 # ============ Load Configuration ============
 CONFIG_FILE = "config.toml"
@@ -305,6 +306,26 @@ def main():
         print(f"  Epochs: {EPOCHS}, Batch size: {BATCH}, LR: {LR}")
         print(f"  Patience: {PATIENCE}, Device: {device}")
         print("=" * 50)
+        
+        # Initialize training logger for publication metrics
+        logger = TrainingLogger(output_dir="training_logs")
+        logger.start_training({
+            'batch_size': BATCH,
+            'epochs': EPOCHS,
+            'learning_rate': LR,
+            'patience': PATIENCE,
+            'modes1': MODES1,
+            'modes2': MODES2,
+            'width': WIDTH,
+            'n_layers': N_LAYERS,
+            'gradient_weight': GRAD_WEIGHT,
+            'spectral_weight': SPECTRAL_WEIGHT,
+            'dataset_size': len(dataset),
+            'distributed': is_distributed,
+            'world_size': world_size,
+        }, model=model.module if is_distributed else model)
+    else:
+        logger = None
 
     # Training loop
     best_loss = float('inf')
@@ -370,10 +391,31 @@ def main():
                 if patience_counter >= PATIENCE:
                     print(f"Early stopping at epoch {epoch}")
                     break
+            
+            # Log epoch metrics for publication
+            if logger:
+                import time
+                logger.log_epoch(epoch, {
+                    'total_loss': avg_loss,
+                    'learning_rate': scheduler.get_last_lr()[0],
+                    'best_loss': best_loss,
+                    'patience': patience_counter,
+                })
 
     if is_main_process(rank):
         print(f"Training finished. Best loss: {best_loss:.6e}")
         print("Saved best model to:", MODEL_OUT)
+        
+        # Finalize training logger
+        if logger:
+            logger.finish_training({'best_loss': best_loss})
+            
+            # Generate publication-ready plots
+            try:
+                from generate_plots import generate_publication_plots
+                generate_publication_plots(logger.metrics_csv)
+            except Exception as e:
+                print(f"[Plots] Could not generate plots: {e}")
 
     cleanup_distributed()
 
