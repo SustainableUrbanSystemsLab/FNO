@@ -21,7 +21,12 @@ EPOCHS = 200
 LR = 1e-3
 MODES1 = 32; MODES2 = 32; WIDTH = 64; N_LAYERS = 5
 FORCE_H = None; FORCE_W = None
-NUM_WORKERS = max(1, cpu_count() // 2)  # Use half of available cores for data loading
+import sys
+# Windows has a limit on multiprocessing handles, cap at 8; Linux can use more
+if sys.platform == 'win32':
+    NUM_WORKERS = min(8, max(1, cpu_count() // 2))
+else:
+    NUM_WORKERS = max(1, cpu_count() // 2)
 
 # ============ Distributed Setup ============
 def setup_distributed():
