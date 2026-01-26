@@ -5,7 +5,7 @@
 # Training data paths - script auto-detects platform
 data_folder_windows = "C:/LabShare/Dataset/FormFluxCases/Compressed/Training_Dataset"
 data_folder_linux = "/storage/coda1/p-pkastner3/0/ikaradag3/FNO/Training_Dataset"
-data_folder_ice = "/home/hice1/ikaradag3/FNO/Training_Dataset" # ICE Cluster Path
+data_folder_ice = "/home/hice1/ikaradag3/scratch/FNO/Training_Dataset" # ICE Cluster Path
 
 # Path to test CSV files for inference
 test_folder = 'test_csv'
