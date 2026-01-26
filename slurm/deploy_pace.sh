@@ -10,6 +10,7 @@ RESET_PATIENCE=""
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
+    case $1 in
         --gpu) GPU_TYPE="$2"; shift ;;
         --ngpus) NUM_GPUS="$2"; shift ;;
         --config) CONFIG_FILE="$2"; shift ;;
