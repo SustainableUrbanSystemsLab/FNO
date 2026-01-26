@@ -199,6 +199,24 @@ def get_cache_hash(files):
 
 def load_or_prepare_dataset(files, rank, is_main):
     """Load from cache or prepare dataset with multiprocessing."""
+    # Support for Pickle-Only Transfer (ICE Cluster)
+    if len(files) == 0:
+        # If no CSVs are found, check if a cache file exists blindly
+        potential_caches = glob.glob(f"{CACHE_FILE}.*")
+        if potential_caches:
+            cache_path = potential_caches[0]
+            if is_main:
+                print(f"Warning: No CSV files found, but detected cache: {cache_path}")
+                print("Attempting to load dataset from cache (Pickle-Only Mode)...")
+            try:
+                with open(cache_path, 'rb') as f:
+                    return pickle.load(f)
+            except Exception as e:
+                if is_main: print(f"Failed to load existing cache {cache_path}: {e}")
+        
+        # If we get here, truly no data
+        return [], [], [], None
+
     cache_hash = get_cache_hash(files)
     cache_path = f"{CACHE_FILE}.{cache_hash}"
     
