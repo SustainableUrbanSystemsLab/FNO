@@ -13,3 +13,4 @@ fno_mag_weights.pth
 dataset_cache.pkl.*
 training_logs/
 logs/
+*.8229ea4dc89746480afc4943e179f730

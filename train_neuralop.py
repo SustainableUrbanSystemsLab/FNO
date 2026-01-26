@@ -33,16 +33,32 @@ from neuralop.losses import LpLoss, H1Loss
 from gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
 from training_logger import TrainingLogger
 
+import argparse
+
 # ============ Load Configuration ============
-CONFIG_FILE = "config.toml"
+def get_config_path():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, default='config.toml', help='Path to config file')
+    args, _ = parser.parse_known_args()
+    return args.config
+
+CONFIG_FILE = get_config_path()
 
 def load_config():
-    """Load configuration from config.toml file."""
+    """Load configuration from the specified toml file."""
     import tomllib
+    # Allow absolute paths or paths relative to CWD
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'rb') as f:
+            return tomllib.load(f)
+    
+    # Fallback to relative to script directory
     config_path = os.path.join(os.path.dirname(__file__), CONFIG_FILE)
     if os.path.exists(config_path):
         with open(config_path, 'rb') as f:
             return tomllib.load(f)
+            
+    print(f"Warning: Config file '{CONFIG_FILE}' not found. Using defaults.")
     return {}
 
 config = load_config()
@@ -65,6 +81,7 @@ N_LAYERS = config.get('model', {}).get('n_layers', 5)
 
 # Loss weights
 GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.3)
+PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0)
 
 # Cache settings
 CACHE_FILE = "dataset_cache_neuralop.pkl"
@@ -386,7 +403,8 @@ def main():
         running_loss = 0.0
         running_l2 = 0.0
         running_h1 = 0.0
-        
+        running_peak = 0.0
+
         pbar = tqdm(loader, desc=f"Epoch {epoch}/{EPOCHS}", leave=False) if is_main_process(rank) else loader
         
         for xb, yb, mb in pbar:
@@ -399,7 +417,19 @@ def main():
             # Combined loss: L2 + weighted H1
             loss_l2 = l2_loss(pred, yb)
             loss_h1 = h1_loss(pred, yb)
-            loss = loss_l2 + GRAD_WEIGHT * loss_h1
+            
+            # Peak Loss Implementation
+            if PEAK_WEIGHT > 0:
+                target_abs = torch.abs(yb)
+                # Flatten to find global threshold for the batch
+                threshold = torch.quantile(target_abs.flatten(), 0.90)
+                peak_mask = (target_abs >= threshold).float()
+                # Apply mask (peaks only)
+                loss_peak = ((pred - yb)**2 * peak_mask).sum() / (peak_mask.sum() + 1e-8)
+            else:
+                loss_peak = torch.tensor(0.0, device=device)
+
+            loss = loss_l2 + GRAD_WEIGHT * loss_h1 + PEAK_WEIGHT * loss_peak
             
             optimizer.zero_grad()
             loss.backward()
@@ -410,6 +440,7 @@ def main():
             running_loss += loss.item() * batch_size
             running_l2 += loss_l2.item() * batch_size
             running_h1 += loss_h1.item() * batch_size
+            running_peak += loss_peak.item() * batch_size if isinstance(loss_peak, torch.Tensor) else 0.0
             
             if is_main_process(rank) and hasattr(pbar, 'set_postfix'):
                 pbar.set_postfix({"loss": f"{loss.item():.4e}"})
@@ -421,9 +452,10 @@ def main():
         avg_loss = running_loss / n_samples
         avg_l2 = running_l2 / n_samples
         avg_h1 = running_h1 / n_samples
-        
+        avg_peak = running_peak / n_samples
+
         if is_main_process(rank):
-            print(f"Epoch {epoch}/{EPOCHS} - Loss: {avg_loss:.6e} (L2: {avg_l2:.4e}, H1: {avg_h1:.4e})")
+            print(f"Epoch {epoch}/{EPOCHS} - Loss: {avg_loss:.6e} (L2: {avg_l2:.4e}, H1: {avg_h1:.4e}, Peak: {avg_peak:.4e})")
             
             # Save checkpoints
             if epoch % 100 == 0:
@@ -451,6 +483,7 @@ def main():
                     'total_loss': avg_loss,
                     'mse_loss': avg_l2,
                     'gradient_loss': avg_h1,
+                    'peak_loss': avg_peak,
                     'learning_rate': scheduler.get_last_lr()[0],
                     'best_loss': best_loss,
                     'patience': patience_counter,

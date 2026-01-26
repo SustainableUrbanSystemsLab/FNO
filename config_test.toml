@@ -1,7 +1,7 @@
 # Test Config
 [paths]
 # Using same paths as original
-data_folder_windows = "C:/Users/ilker/Desktop/FNO/test_csv"
+data_folder_windows = "C:/LabShare/Dataset/FormFluxCases/Compressed/Training_Dataset"
 data_folder_linux = "/storage/coda1/p-pkastner3/0/ikaradag3/FNO/Training_Dataset"
 model_output = "test_model.pth"
 
@@ -21,6 +21,7 @@ n_layers = 2
 [loss]
 gradient_weight = 0.1
 spectral_weight = 0.1
+peak_weight = 1.0
 
 [performance]
 num_workers = 0

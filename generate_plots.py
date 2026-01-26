@@ -104,12 +104,12 @@ def generate_publication_plots(metrics_csv: str, output_dir: str = None):
     
     # Plot 3: Loss Components (if available)
     has_components = any(col in df.columns and df[col].sum() > 0 
-                         for col in ['mse_loss', 'gradient_loss', 'spectral_loss'])
+                         for col in ['mse_loss', 'gradient_loss', 'spectral_loss', 'peak_loss'])
     
     if has_components:
         fig, ax = plt.subplots()
-        colors = {'mse_loss': 'blue', 'gradient_loss': 'orange', 'spectral_loss': 'green'}
-        labels = {'mse_loss': 'MSE Loss', 'gradient_loss': 'Gradient Loss', 'spectral_loss': 'Spectral Loss'}
+        colors = {'mse_loss': 'blue', 'gradient_loss': 'orange', 'spectral_loss': 'green', 'peak_loss': 'red'}
+        labels = {'mse_loss': 'MSE Loss', 'gradient_loss': 'Gradient Loss', 'spectral_loss': 'Spectral Loss', 'peak_loss': 'Peak Loss'}
         
         for col, color in colors.items():
             if col in df.columns and df[col].sum() > 0:

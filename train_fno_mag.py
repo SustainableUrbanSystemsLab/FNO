@@ -39,8 +39,15 @@ MODES1 = config.get('model', {}).get('modes1', 32)
 MODES2 = config.get('model', {}).get('modes2', 32)
 WIDTH = config.get('model', {}).get('width', 64)
 N_LAYERS = config.get('model', {}).get('n_layers', 5)
+
+# ============ Load Logger ============
+from training_logger import TrainingLogger
+
+# ... (Config loading remains the same until GRAD_WEIGHT) ...
 GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.15)
 SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
+PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0) # Load peak weight
+
 FORCE_H = None; FORCE_W = None
 
 def infer_grid(xs, ys, tol=1e-6):
@@ -188,15 +195,26 @@ model = FNO2d(in_channels=in_ch, out_channels=1, modes1=MODES1, modes2=MODES2, w
 opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
 scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=200, gamma=0.5)
 
-# Early Stopping parameters
-EPOCHS = 200
-PATIENCE = 50 
+# Initialize Logger
+logger = TrainingLogger(output_dir="training_logs", experiment_name=None)
+# Combine config for logging
+full_config = config.copy()
+full_config['training'] = {'batch_size': BATCH, 'epochs': EPOCHS, 'lr': LR}
+full_config['model'] = {'modes1': MODES1, 'modes2': MODES2, 'width': WIDTH, 'n_layers': N_LAYERS}
+full_config['loss'] = {'grad_weight': GRAD_WEIGHT, 'spectral_weight': SPECTRAL_WEIGHT, 'peak_weight': PEAK_WEIGHT}
+
+logger.start_training(full_config, model=model)
+
+# Early Stopping parameters (from config if available)
+PATIENCE = config.get('training', {}).get('patience', 50)
 best_loss = float('inf')
 patience_counter = 0
 
+import time
+
 def save_feature_importance(model, feature_names, epoch_num=None):
     try:
-        print(f"\n--- Feature Importance (based on in_proj weights) ---")
+        # print(f"\n--- Feature Importance (based on in_proj weights) ---")
         w = model.in_proj.weight.detach().cpu().numpy()
         importance = np.linalg.norm(w.squeeze(), axis=0)
         importance_pct = 100.0 * importance / importance.sum()
@@ -204,7 +222,8 @@ def save_feature_importance(model, feature_names, epoch_num=None):
         feature_names = list(feature_names)
         indices = np.argsort(importance)[::-1]
         
-        filename = "feature_importance.txt"
+        # Save to experiment dir instead of root
+        filename = os.path.join(logger.experiment_dir, "feature_importance.txt")
         with open(filename, "a") as f: # Append mode to accumulate history
             header = f"\nEpoch {epoch_num} Importance" if epoch_num else "\nFinal Importance"
             f.write(header + "\n" + "-"*30 + "\n")
@@ -212,26 +231,68 @@ def save_feature_importance(model, feature_names, epoch_num=None):
             for i in indices:
                 name = feature_names[i] if i < len(feature_names) else f"Ch_{i}"
                 msg = f"{name:15s}: {importance_pct[i]:.2f}%"
-                print(msg)
+                # print(msg)
                 f.write(msg + "\n")
-        print(f"Appended to {filename}")
+        # print(f"Appended to {filename}")
     except Exception as e:
         print(f"Failed to calculate feature importance: {e}")
 
 for epoch in range(1, EPOCHS+1):
     model.train(); running=0.0
+    
+    # Track components sum
+    running_comp = {'mse_loss': 0.0, 'gradient_loss': 0.0, 'spectral_loss': 0.0, 'peak_loss': 0.0}
+    
+    start_time = time.time()
     pbar = tqdm(loader, desc=f"Epoch {epoch}/{EPOCHS}", leave=False)
+    
     for xb, yb, mb in pbar:
         xb = xb.float(); yb = yb.float(); mb = mb.float()
         pred = model(xb)
-        loss = sensor_weighted_mse(pred, yb, sensor_mask=mb, grad_weight=GRAD_WEIGHT, spectral_weight=SPECTRAL_WEIGHT)
+        
+        # Pass PEAK_WEIGHT here
+        loss, components = sensor_weighted_mse(pred, yb, sensor_mask=mb, 
+                                             grad_weight=GRAD_WEIGHT, 
+                                             spectral_weight=SPECTRAL_WEIGHT, 
+                                             peak_weight=PEAK_WEIGHT,
+                                             return_components=True)
+                                             
         opt.zero_grad(); loss.backward(); opt.step()
-        running += float(loss.item()) * xb.shape[0]
+        
+        batch_size = xb.shape[0]
+        running += float(loss.item()) * batch_size
+        
+        # Accumulate components
+        for k, v in components.items():
+            if k in running_comp:
+                running_comp[k] += v * batch_size
+                
         pbar.set_postfix({"loss": f"{loss.item():.4e}"})
+        
     scheduler.step()
+    epoch_time = time.time() - start_time
     
     avg_loss = running/len(dataset)
-    print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e}")
+    
+    # Calculate average components
+    dataset_len = len(dataset)
+    avg_components = {k: v / dataset_len for k, v in running_comp.items()}
+    
+    # Prepare metrics for logger
+    metrics = {
+        'total_loss': avg_loss,
+        'mse_loss': avg_components['mse_loss'],
+        'gradient_loss': avg_components['gradient_loss'],
+        'spectral_loss': avg_components['spectral_loss'],
+        'peak_loss': avg_components['peak_loss'],
+        'learning_rate': opt.param_groups[0]['lr'],
+        'epoch_time': epoch_time,
+        'best_loss': best_loss, 
+        'patience': patience_counter
+    }
+    
+    logger.log_epoch(epoch, metrics)
+    print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e} (Peak: {avg_components['peak_loss']:.6e})")
     
     # Save epoch checkpoint history (every 10 epochs)
     if epoch % 100 == 0:
@@ -265,6 +326,10 @@ for epoch in range(1, EPOCHS+1):
             save_feature_importance(model, chs, epoch_num=epoch) # Save at early stop too
             break
 
+# Finish Logger
+logger.finish_training()
+
 print(f"Training finished. Best loss: {best_loss:.6e}")
 print("Saved best model to:", MODEL_OUT)
+# Also save feature importance to main output
 save_feature_importance(model, chs)
