@@ -66,7 +66,7 @@ if [ "${NUM_GPUS:-1}" -gt 1 ]; then
     uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_fno_mag.py ${CONFIG_FLAG} ${RESET_FLAG}
 else
     echo "Starting SINGLE-GPU training..."
-    uv run python train_fno_mag.py
+    uv run python train_fno_mag.py ${CONFIG_FLAG} ${RESET_FLAG}
 fi
 
 echo "Job finished on $(date)"

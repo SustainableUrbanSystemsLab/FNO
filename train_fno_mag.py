@@ -31,7 +31,20 @@ import sys
 if sys.platform == 'win32':
     DATA_FOLDER = config.get('paths', {}).get('data_folder_windows', 'train_csv')
 else:
-    DATA_FOLDER = config.get('paths', {}).get('data_folder_linux', 'train_csv')
+    # Check for PACE vs ICE paths
+    pace_path = config.get('paths', {}).get('data_folder_linux', None)
+    ice_path = config.get('paths', {}).get('data_folder_ice', None)
+    
+    if pace_path and os.path.exists(pace_path):
+        DATA_FOLDER = pace_path
+        print(f"Environment: PACE Cluster detected ({DATA_FOLDER})")
+    elif ice_path and os.path.exists(ice_path):
+        DATA_FOLDER = ice_path
+        print(f"Environment: ICE Cluster detected ({DATA_FOLDER})")
+    else:
+        # Fallback to current directory or default
+        DATA_FOLDER = 'train_csv'
+        print(f"Environment: Linux (Generic). using local {DATA_FOLDER}")
 
 MODEL_OUT = config.get('paths', {}).get('model_output', 'fno_mag_weights.pth')
 # DEVICE = "cuda" if torch.cuda.is_available() else "cpu" # defined in distributed setup now
