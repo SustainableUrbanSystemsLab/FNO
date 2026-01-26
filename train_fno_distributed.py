@@ -2,7 +2,7 @@
 # Usage: torchrun --nproc_per_node=2 train_fno_distributed.py
 #    or: python train_fno_distributed.py (falls back to single GPU)
 
-import os, glob, numpy as np, pandas as pd, torch, hashlib, pickle, sys
+import os, glob, numpy as np, pandas as pd, torch, hashlib, pickle, sys, argparse
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, TensorDataset
@@ -38,11 +38,13 @@ else:
     DATA_FOLDER = config.get('paths', {}).get('data_folder_linux', 'train_csv')
 
 MODEL_OUT = config.get('paths', {}).get('model_output', 'fno_mag_weights.pth')
+CHECKPOINT_PATH = config.get('paths', {}).get('checkpoint_file', 'checkpoint_latest.pth')
 CACHE_FILE = "dataset_cache.pkl"
 BATCH = config.get('training', {}).get('batch_size', 4)
 EPOCHS = config.get('training', {}).get('epochs', 200)
 LR = config.get('training', {}).get('learning_rate', 1e-3)
 PATIENCE = config.get('training', {}).get('patience', 50)
+CHECKPOINT_INTERVAL = config.get('training', {}).get('checkpoint_interval', 10)
 MODES1 = config.get('model', {}).get('modes1', 32)
 MODES2 = config.get('model', {}).get('modes2', 32)
 WIDTH = config.get('model', {}).get('width', 64)
@@ -213,6 +215,11 @@ def load_or_prepare_dataset(files, rank, is_main):
 
 # ============ Main Training ============
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='FNO Training')
+    parser.add_argument('--fresh', action='store_true', help='Start fresh training (ignore checkpoint)')
+    args = parser.parse_args()
+    
     local_rank, rank, world_size, is_distributed = setup_distributed()
     device = torch.device(f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
     
@@ -300,9 +307,42 @@ def main():
     
     opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)  # Smooth LR decay
+    
+    # Checkpoint resume logic (auto-detect)
+    start_epoch = 1
+    best_loss = float('inf')
+    patience_counter = 0
+    
+    # Auto-resume if checkpoint exists (unless --fresh flag is passed)
+    if os.path.exists(CHECKPOINT_PATH) and not args.fresh:
+        if is_main_process(rank):
+            print("=" * 50)
+            print("CHECKPOINT DETECTED")
+            print("=" * 50)
+            print(f"  Loading from: {CHECKPOINT_PATH}")
+        checkpoint = torch.load(CHECKPOINT_PATH, map_location=device)
+        if is_distributed:
+            model.module.load_state_dict(checkpoint['model'])
+        else:
+            model.load_state_dict(checkpoint['model'])
+        opt.load_state_dict(checkpoint['optimizer'])
+        scheduler.load_state_dict(checkpoint['scheduler'])
+        start_epoch = checkpoint['epoch'] + 1
+        best_loss = checkpoint['best_loss']
+        patience_counter = checkpoint['patience_counter']
+        if is_main_process(rank):
+            print(f"  Last completed epoch: {checkpoint['epoch']}")
+            print(f"  Best loss so far: {best_loss:.6e}")
+            print(f"  Training will continue from epoch {start_epoch}")
+            print(f"  (Use 'python train_fno_distributed.py --fresh' to start from scratch)")
+            print("=" * 50)
+    else:
+        if is_main_process(rank):
+            print("=" * 50)
+            print("STARTING FRESH TRAINING")
+            print("=" * 50)
 
     if is_main_process(rank):
-        print("STARTING TRAINING...")
         print(f"  Epochs: {EPOCHS}, Batch size: {BATCH}, LR: {LR}")
         print(f"  Patience: {PATIENCE}, Device: {device}")
         print("=" * 50)
@@ -328,10 +368,8 @@ def main():
         logger = None
 
     # Training loop
-    best_loss = float('inf')
-    patience_counter = 0
 
-    for epoch in range(1, EPOCHS + 1):
+    for epoch in range(start_epoch, EPOCHS + 1):
         if is_distributed:
             sampler.set_epoch(epoch)
         
@@ -374,9 +412,13 @@ def main():
             torch.cuda.synchronize()
             dist.barrier()
             
-            running_tensor = torch.tensor([running], device=device)
+            # Aggregate all loss components across GPUs
+            running_tensor = torch.tensor([running, running_mse, running_grad, running_spec], device=device)
             dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
-            running = running_tensor.item()
+            running = running_tensor[0].item()
+            running_mse = running_tensor[1].item()
+            running_grad = running_tensor[2].item()
+            running_spec = running_tensor[3].item()
         
         avg_loss = running / n_samples
         avg_mse = running_mse / n_samples
@@ -386,12 +428,18 @@ def main():
         if is_main_process(rank):
             print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e}")
             
-            # Save checkpoints
-            if epoch % 100 == 0:
-                os.makedirs("epochs", exist_ok=True)
-                epoch_path = os.path.join("epochs", MODEL_OUT + f".epoch{epoch}")
-                state_dict = model.module.state_dict() if is_distributed else model.state_dict()
-                torch.save(state_dict, epoch_path)
+            # Save resumable checkpoint every N epochs
+            if epoch % CHECKPOINT_INTERVAL == 0:
+                checkpoint = {
+                    'epoch': epoch,
+                    'model': model.module.state_dict() if is_distributed else model.state_dict(),
+                    'optimizer': opt.state_dict(),
+                    'scheduler': scheduler.state_dict(),
+                    'best_loss': best_loss,
+                    'patience_counter': patience_counter,
+                }
+                torch.save(checkpoint, CHECKPOINT_PATH)
+                print(f"  > Checkpoint saved to {CHECKPOINT_PATH}")
 
             # Early stopping
             if avg_loss < best_loss:

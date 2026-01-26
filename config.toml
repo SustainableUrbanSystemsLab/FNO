@@ -17,6 +17,7 @@ batch_size = 4
 epochs = 500            # Increased from 200 for better convergence
 learning_rate = 0.0005  # Reduced from 0.001 for more stable training
 patience = 75           # Increased from 50 to allow more exploration
+checkpoint_interval = 25  # Save resumable checkpoint every N epochs
 
 [model]
 modes1 = 48  # Increased from 32 for sharper predictions
