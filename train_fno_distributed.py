@@ -57,6 +57,7 @@ WIDTH = config.get('model', {}).get('width', 64)
 N_LAYERS = config.get('model', {}).get('n_layers', 5)
 GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.15)
 SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
+PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0)
 FORCE_H = None; FORCE_W = None
 
 # Worker count from config (0 = auto-detect)
@@ -148,7 +149,7 @@ def process_single_file(fp):
                 valid_val = 1.0
             
             delta_u_normalized = (val - u_over_uref_val) / (u_over_uref_val + 1e-6)
-            delta_u_normalized = np.clip(delta_u_normalized, -1.0, 5.0)
+            # delta_u_normalized = np.clip(delta_u_normalized, -1.0, 5.0) # REMOVED CLIPPING
             Y_grid[0, iy, ix] = float(delta_u_normalized)
             
             sensor_w = float(df['is_sensor'].iloc[i]) if 'is_sensor' in df.columns else 1.0
@@ -406,6 +407,7 @@ def main():
         running_mse = 0.0
         running_grad = 0.0
         running_spec = 0.0
+        running_peak = 0.0
         
         for xb, yb, mb in pbar:
             xb = xb.float().to(device)
@@ -413,7 +415,11 @@ def main():
             mb = mb.float().to(device)
             
             pred = model(xb)
-            loss, components = sensor_weighted_mse(pred, yb, sensor_mask=mb, grad_weight=GRAD_WEIGHT, spectral_weight=SPECTRAL_WEIGHT, return_components=True)
+            loss, components = sensor_weighted_mse(pred, yb, sensor_mask=mb, 
+                                                grad_weight=GRAD_WEIGHT, 
+                                                spectral_weight=SPECTRAL_WEIGHT,
+                                                peak_weight=PEAK_WEIGHT,
+                                                return_components=True)
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -423,6 +429,7 @@ def main():
             running_mse += components['mse_loss'] * batch_size
             running_grad += components['gradient_loss'] * batch_size
             running_spec += components['spectral_loss'] * batch_size
+            running_peak += components.get('peak_loss', 0.0) * batch_size
             
             if is_main_process(rank) and hasattr(pbar, 'set_postfix'):
                 pbar.set_postfix({"loss": f"{loss.item():.4e}"})
@@ -437,17 +444,19 @@ def main():
             dist.barrier()
             
             # Aggregate all loss components across GPUs
-            running_tensor = torch.tensor([running, running_mse, running_grad, running_spec], device=device)
+            running_tensor = torch.tensor([running, running_mse, running_grad, running_spec, running_peak], device=device)
             dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
             running = running_tensor[0].item()
             running_mse = running_tensor[1].item()
             running_grad = running_tensor[2].item()
             running_spec = running_tensor[3].item()
+            running_peak = running_tensor[4].item()
         
         avg_loss = running / n_samples
         avg_mse = running_mse / n_samples
         avg_grad = running_grad / n_samples
         avg_spec = running_spec / n_samples
+        avg_peak = running_peak / n_samples
         
         if is_main_process(rank):
             epoch_duration = time.time() - epoch_start
@@ -491,6 +500,7 @@ def main():
                     'mse_loss': avg_mse,
                     'gradient_loss': avg_grad,
                     'spectral_loss': avg_spec,
+                    'peak_loss': avg_peak,
                     'learning_rate': scheduler.get_last_lr()[0],
                     'epoch_time': epoch_duration,
                     'best_loss': best_loss,

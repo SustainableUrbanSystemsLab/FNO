@@ -97,8 +97,8 @@ def spectral_loss(pred, target, mask=None):
     return F.mse_loss(pred_log, target_log)
 
 
-def physics_loss(pred, target, mask=None, grad_weight=0.15, spectral_weight=0.05, return_components=False):
-    """Combined MSE, Gradient Loss, Spectral Loss, and Acceleration Curb.
+def physics_loss(pred, target, mask=None, grad_weight=0.15, spectral_weight=0.05, peak_weight=0.0, return_components=False):
+    """Combined MSE, Gradient Loss, Spectral Loss, Acceleration Curb, and Peak-Aware Loss.
     
     Args:
         pred: Predicted field (B, C, H, W)
@@ -106,6 +106,7 @@ def physics_loss(pred, target, mask=None, grad_weight=0.15, spectral_weight=0.05
         mask: Optional weight mask (B, C, H, W)
         grad_weight: Weight for gradient loss (default 0.15)
         spectral_weight: Weight for spectral/FFT loss (default 0.05)
+        peak_weight: Weight for top-10% data loss (default 0.0)
         return_components: If True, return dict with individual loss components
     
     Returns:
@@ -143,21 +144,56 @@ def physics_loss(pred, target, mask=None, grad_weight=0.15, spectral_weight=0.05
     
     # 3. Spectral Loss (preserve high-frequency features)
     spec_loss = spectral_loss(pred, target, mask) if spectral_weight > 0 else torch.tensor(0.0, device=pred.device)
+
+    # 4. Peak-Aware Loss (Top 10% focus)
+    if peak_weight > 0:
+        # Calculate 90th percentile of absolute target values
+        # We use absolute because high negative values (if any) are also "peaks"
+        # Since target is usually delta_u or standardized, we care about extremes.
+        target_abs = torch.abs(target)
+        if mask is not None:
+             # Only consider valid regions for quantile
+             valid_vals = target_abs[mask > 0]
+             if valid_vals.numel() > 0:
+                k = int(0.9 * valid_vals.numel())
+                # kthvalue is faster/more robust than quantile sometimes, but quantile is standard
+                # We want the CUTOFF value. 
+                # torch.quantile requires 1D view if we want global quantile
+                threshold = torch.quantile(valid_vals, 0.90)
+                
+                # Mask for top 10%
+                peak_mask = (target_abs >= threshold)
+                
+                # Apply original mask as well
+                combined_peak_mask = peak_mask & (mask > 0)
+                
+                # MSE on peaks
+                peak_diff = (pred - target)
+                peak_mse = (peak_diff**2 * combined_peak_mask).sum() / (combined_peak_mask.sum() + 1e-8)
+             else:
+                peak_mse = torch.tensor(0.0, device=pred.device)
+        else:
+            threshold = torch.quantile(target_abs.view(-1), 0.90)
+            peak_mask = (target_abs >= threshold)
+            peak_mse = ((pred - target)**2 * peak_mask).mean()
+    else:
+        peak_mse = torch.tensor(0.0, device=pred.device)
     
-    total_loss = mse + grad_weight * grad_loss + spectral_weight * spec_loss
+    total_loss = mse + grad_weight * grad_loss + spectral_weight * spec_loss + peak_weight * peak_mse
     
     if return_components:
         components = {
             'mse_loss': float(mse.item()),
             'gradient_loss': float(grad_loss.item()),
             'spectral_loss': float(spec_loss.item()) if isinstance(spec_loss, torch.Tensor) else 0.0,
+            'peak_loss': float(peak_mse.item()) if isinstance(peak_mse, torch.Tensor) else 0.0,
         }
         return total_loss, components
     
     return total_loss
 
 
-def sensor_weighted_mse(pred, target, sensor_mask=None, grad_weight=0.15, spectral_weight=0.05, return_components=False):
+def sensor_weighted_mse(pred, target, sensor_mask=None, grad_weight=0.15, spectral_weight=0.05, peak_weight=0.0, return_components=False):
     """Backward compatible wrapper with configurable loss weights."""
-    return physics_loss(pred, target, sensor_mask, grad_weight, spectral_weight, return_components)
+    return physics_loss(pred, target, sensor_mask, grad_weight, spectral_weight, peak_weight, return_components)
 

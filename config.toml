@@ -14,9 +14,9 @@ model_output = "fno_mag_weights.pth"
 
 [training]
 batch_size = 4
-epochs = 500            # Increased from 200 for better convergence
-learning_rate = 0.0005  # Reduced from 0.001 for more stable training
-patience = 75           # Increased from 50 to allow more exploration
+epochs = 30           # Reduced to 30 (Restart focus)
+learning_rate = 3e-5    # Reduced for fine-tuning
+patience = 50           # Default, but will rely on manual stopping or shorter epochs
 checkpoint_interval = 25  # Save resumable checkpoint every N epochs
 
 [model]
@@ -27,8 +27,9 @@ n_layers = 5
 
 [loss]
 # Loss function weights (MSE is always 1.0)
-gradient_weight = 0.10  # Reduced to avoid damping/smoothing
-spectral_weight = 0.20  # Moderate increase (User suggestion)
+gradient_weight = 0.15  # Restored/Standard (0.1-0.2)
+spectral_weight = 0.25  # Increased (0.15-0.25 range requested)
+peak_weight = 1.0       # NEW: Peak-Aware Loss (Top 10%)
 
 [performance]
 # Number of parallel workers for data loading (0 = auto-detect)
