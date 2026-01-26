@@ -1,5 +1,8 @@
 # Train FNO to predict dimensionless magnitude (mag_U)
 import os, glob, numpy as np, pandas as pd, torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 from torch.utils.data import DataLoader, TensorDataset
 from fno2d_model import FNO2d, sensor_weighted_mse
@@ -137,11 +140,11 @@ for fp in tqdm(files, desc="Data Preparation"):
         else:
             valid_val = 1.0
         
-        # Target: Deficit relative to local inlet profile
-        delta_u_normalized = (val - u_over_uref_val) / (u_over_uref_val + 1e-6)
-        delta_u_normalized = np.clip(delta_u_normalized, -1.0, 5.0)
+        # Target: Absolute Dimensionless Magnitude (Direct Prediction)
+        # Use simple clipping to avoid extreme outliers
+        target_val = np.clip(val, 0.0, 5.0)
         
-        Y_grid[0, iy, ix] = float(delta_u_normalized)
+        Y_grid[0, iy, ix] = float(target_val)
         
         sensor_w = float(df['is_sensor'].iloc[i]) if 'is_sensor' in df.columns else 1.0
         sdf_val = max(float(df['SDF'].iloc[i]), 0.0)
@@ -187,23 +190,54 @@ print("Dataset shapes", X_all.shape, Y_all.shape, M_all.shape)
 # This ensures each training step sees ALL directions for ONE building geometry.
 # This forces the model to learn how the fixed geometry interacts with changing wind.
 
+# ============ Distributed Setup ============
+def setup_distributed():
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        rank = int(os.environ['RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        local_rank = int(os.environ.get('LOCAL_RANK', 0))
+        dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
+        torch.cuda.set_device(local_rank)
+        print(f"Distributed: True | Rank {rank}/{world_size}")
+        return rank, world_size, local_rank, True
+    return 0, 1, 0, False
+
+RANK, WORLD_SIZE, LOCAL_RANK, IS_DISTRIBUTED = setup_distributed()
+DEVICE = f"cuda:{LOCAL_RANK}" if torch.cuda.is_available() else "cpu"
+
 dataset = TensorDataset(X_all, Y_all, M_all)
-loader = DataLoader(dataset, batch_size=BATCH, shuffle=False)
+
+if IS_DISTRIBUTED:
+    sampler = DistributedSampler(dataset, num_replicas=WORLD_SIZE, rank=RANK, shuffle=True)
+    loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, pin_memory=True)
+else:
+    sampler = None
+    loader = DataLoader(dataset, batch_size=BATCH, shuffle=True)
 
 in_ch = X_all.shape[1]
 model = FNO2d(in_channels=in_ch, out_channels=1, modes1=MODES1, modes2=MODES2, width=WIDTH, n_layers=N_LAYERS).to(DEVICE)
+
+if IS_DISTRIBUTED:
+    model = DDP(model, device_ids=[LOCAL_RANK])
+elif torch.cuda.device_count() > 1:
+    print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+    model = nn.DataParallel(model)
+
 opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
-scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=200, gamma=0.5)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
 
-# Initialize Logger
-logger = TrainingLogger(output_dir="training_logs", experiment_name=None)
-# Combine config for logging
-full_config = config.copy()
-full_config['training'] = {'batch_size': BATCH, 'epochs': EPOCHS, 'lr': LR}
-full_config['model'] = {'modes1': MODES1, 'modes2': MODES2, 'width': WIDTH, 'n_layers': N_LAYERS}
-full_config['loss'] = {'grad_weight': GRAD_WEIGHT, 'spectral_weight': SPECTRAL_WEIGHT, 'peak_weight': PEAK_WEIGHT}
-
-logger.start_training(full_config, model=model)
+# Initialize Logger (Only on Rank 0)
+if RANK == 0:
+    logger = TrainingLogger(output_dir="training_logs", experiment_name=None)
+    # Combine config for logging
+    full_config = config.copy()
+    full_config['training'] = {'batch_size': BATCH, 'epochs': EPOCHS, 'lr': LR}
+    full_config['model'] = {'modes1': MODES1, 'modes2': MODES2, 'width': WIDTH, 'n_layers': N_LAYERS}
+    full_config['loss'] = {'grad_weight': GRAD_WEIGHT, 'spectral_weight': SPECTRAL_WEIGHT, 'peak_weight': PEAK_WEIGHT}
+    
+    logger.start_training(full_config, model=model)
+else:
+    logger = None
 
 # Early Stopping parameters (from config if available)
 PATIENCE = config.get('training', {}).get('patience', 50)
@@ -240,11 +274,19 @@ def save_feature_importance(model, feature_names, epoch_num=None):
 for epoch in range(1, EPOCHS+1):
     model.train(); running=0.0
     
+    if IS_DISTRIBUTED:
+        sampler.set_epoch(epoch)
+    
     # Track components sum
-    running_comp = {'mse_loss': 0.0, 'gradient_loss': 0.0, 'spectral_loss': 0.0, 'peak_loss': 0.0}
+    running_comp = {'mse_loss': 0.0, 'gradient_loss': 0.0, 'spectral_loss': 0.0, 'peak_loss': 0.0, 'neg_loss': 0.0}
     
     start_time = time.time()
-    pbar = tqdm(loader, desc=f"Epoch {epoch}/{EPOCHS}", leave=False)
+    
+    # Only show progress bar on Rank 0
+    if RANK == 0:
+        pbar = tqdm(loader, desc=f"Epoch {epoch}/{EPOCHS}", leave=False)
+    else:
+        pbar = loader
     
     for xb, yb, mb in pbar:
         xb = xb.float(); yb = yb.float(); mb = mb.float()
@@ -291,8 +333,9 @@ for epoch in range(1, EPOCHS+1):
         'patience': patience_counter
     }
     
-    logger.log_epoch(epoch, metrics)
-    print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e} (Peak: {avg_components['peak_loss']:.6e})")
+    if RANK == 0:
+        logger.log_epoch(epoch, metrics)
+        print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e} (Peak: {avg_components['peak_loss']:.6e})")
     
     # Save epoch checkpoint history (every 10 epochs)
     if epoch % 100 == 0:
@@ -327,7 +370,8 @@ for epoch in range(1, EPOCHS+1):
             break
 
 # Finish Logger
-logger.finish_training()
+if RANK == 0:
+    logger.finish_training()
 
 print(f"Training finished. Best loss: {best_loss:.6e}")
 print("Saved best model to:", MODEL_OUT)

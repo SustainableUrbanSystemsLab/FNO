@@ -145,48 +145,52 @@ def physics_loss(pred, target, mask=None, grad_weight=0.15, spectral_weight=0.05
     # 3. Spectral Loss (preserve high-frequency features)
     spec_loss = spectral_loss(pred, target, mask) if spectral_weight > 0 else torch.tensor(0.0, device=pred.device)
 
-    # 4. Peak-Aware Loss (Top 10% focus)
+    # 4. Peak-Aware Loss (Top 5% focus - L1 Loss)
     if peak_weight > 0:
-        # Calculate 90th percentile of absolute target values
-        # We use absolute because high negative values (if any) are also "peaks"
-        # Since target is usually delta_u or standardized, we care about extremes.
+        # Calculate 95th percentile of absolute target values to focus on extremes
         target_abs = torch.abs(target)
         if mask is not None:
              # Only consider valid regions for quantile
              valid_vals = target_abs[mask > 0]
              if valid_vals.numel() > 0:
-                k = int(0.9 * valid_vals.numel())
-                # kthvalue is faster/more robust than quantile sometimes, but quantile is standard
-                # We want the CUTOFF value. 
-                # torch.quantile requires 1D view if we want global quantile
-                threshold = torch.quantile(valid_vals, 0.90)
+                # We want the CUTOFF value for top 5%
+                threshold = torch.quantile(valid_vals, 0.95)
                 
-                # Mask for top 10%
+                # Mask for top 5%
                 peak_mask = (target_abs >= threshold)
                 
                 # Apply original mask as well
                 combined_peak_mask = peak_mask & (mask > 0)
                 
-                # MSE on peaks
-                peak_diff = (pred - target)
-                peak_mse = (peak_diff**2 * combined_peak_mask).sum() / (combined_peak_mask.sum() + 1e-8)
+                # L1 Loss on peaks (Absolute Error is sharper than MSE)
+                peak_diff = torch.abs(pred - target)
+                peak_loss = (peak_diff * combined_peak_mask).sum() / (combined_peak_mask.sum() + 1e-8)
              else:
-                peak_mse = torch.tensor(0.0, device=pred.device)
+                peak_loss = torch.tensor(0.0, device=pred.device)
         else:
-            threshold = torch.quantile(target_abs.view(-1), 0.90)
-            peak_mask = (target_abs >= threshold)
-            peak_mse = ((pred - target)**2 * peak_mask).mean()
+            threshold = torch.quantile(target_abs.view(-1), 0.95)
+            peak_mask = (target_abs >= threshold).float()
+            peak_loss = (torch.abs(pred - target) * peak_mask).sum() / (peak_mask.sum() + 1e-8)
     else:
-        peak_mse = torch.tensor(0.0, device=pred.device)
+        peak_loss = torch.tensor(0.0, device=pred.device)
+    # 5. Negativity Penalty (Enforce Physics: mag_U >= 0)
+    # Penalize any negative predictions heavily
+    neg_loss = F.relu(-pred)
+    if mask is not None:
+        neg_loss = neg_loss * (mask > 0)
+        
+    neg_loss_val = neg_loss.mean()
+    neg_weight = 5.0 # Hardcoded weight for now, strong enough to enforce constraint
     
-    total_loss = mse + grad_weight * grad_loss + spectral_weight * spec_loss + peak_weight * peak_mse
+    total_loss = mse + grad_weight * grad_loss + spectral_weight * spec_loss + peak_weight * peak_loss + neg_weight * neg_loss_val
     
     if return_components:
         components = {
             'mse_loss': float(mse.item()),
             'gradient_loss': float(grad_loss.item()),
             'spectral_loss': float(spec_loss.item()) if isinstance(spec_loss, torch.Tensor) else 0.0,
-            'peak_loss': float(peak_mse.item()) if isinstance(peak_mse, torch.Tensor) else 0.0,
+            'peak_loss': float(peak_loss.item()) if isinstance(peak_loss, torch.Tensor) else 0.0,
+            'neg_loss': float(neg_loss_val.item()),
         }
         return total_loss, components
     
