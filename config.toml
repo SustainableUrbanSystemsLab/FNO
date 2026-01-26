@@ -14,8 +14,8 @@ model_output = "fno_mag_weights.pth"
 
 [training]
 batch_size = 4
-epochs = 30           # Reduced to 30 (Restart focus)
-learning_rate = 3e-5    # Reduced for fine-tuning
+epochs = 200            # Restored to 200 (Production)
+learning_rate = 5e-4    # Restored to 5e-4 (Production)
 patience = 50           # Default, but will rely on manual stopping or shorter epochs
 checkpoint_interval = 25  # Save resumable checkpoint every N epochs
 
