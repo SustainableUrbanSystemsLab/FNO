@@ -83,7 +83,7 @@ class TrainingLogger:
         self.csv_file = open(self.metrics_csv, 'w', newline='')
         self.csv_writer = csv.writer(self.csv_file)
         headers = [
-            'epoch', 'total_loss', 'mse_loss', 'gradient_loss', 'spectral_loss',
+            'epoch', 'total_loss', 'mse_loss', 'gradient_loss', 'spectral_loss', 'peak_loss',
             'learning_rate', 'epoch_time_sec', 'best_loss', 'patience_counter'
         ]
         self.csv_writer.writerow(headers)
@@ -95,7 +95,7 @@ class TrainingLogger:
         Args:
             epoch: Current epoch number
             metrics: Dictionary with keys like 'total_loss', 'mse_loss', 'gradient_loss', 
-                    'spectral_loss', 'learning_rate', 'epoch_time', 'best_loss', 'patience'
+                    'spectral_loss', 'peak_loss', 'learning_rate', 'epoch_time', 'best_loss', 'patience'
         """
         row = [
             epoch,
@@ -103,6 +103,7 @@ class TrainingLogger:
             metrics.get('mse_loss', 0.0),
             metrics.get('gradient_loss', 0.0),
             metrics.get('spectral_loss', 0.0),
+            metrics.get('peak_loss', 0.0),
             metrics.get('learning_rate', 0.0),
             metrics.get('epoch_time', 0.0),
             metrics.get('best_loss', 0.0),

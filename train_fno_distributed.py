@@ -353,6 +353,19 @@ def main():
             patience_counter = 0
             if is_main_process(rank):
                 print("  [INFO] Patience and best_loss RESET via --reset-patience")
+                
+            # FORCE NEW HYPERPARAMETERS
+            # 1. Update Optimizer LR
+            for param_group in opt.param_groups:
+                param_group['lr'] = LR
+            if is_main_process(rank):
+                print(f"  [INFO] Learning rate updated to {LR}")
+                
+            # 2. Reset Scheduler (to respect new epochs and LR)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
+            if is_main_process(rank):
+                print(f"  [INFO] Scheduler reset with T_max={EPOCHS}")
+
         
         if is_main_process(rank):
             print(f"  Last completed epoch: {checkpoint['epoch']}")
@@ -393,7 +406,21 @@ def main():
 
     # Training loop
 
-    for epoch in range(start_epoch, EPOCHS + 1):
+    # Determine end epoch
+    if args.reset_patience:
+        # If resetting, we treat EPOCHS as "additional epochs" or "new phase duration"
+        target_end_epoch = start_epoch + EPOCHS - 1
+        if is_main_process(rank):
+            print(f"  [INFO] Training for {EPOCHS} additional epochs (End epoch: {target_end_epoch})")
+    else:
+        # Standard behavior: EPOCHS is the total absolute epoch count
+        target_end_epoch = EPOCHS
+        if start_epoch > target_end_epoch:
+            if is_main_process(rank):
+                print(f"  [WARNING] Start epoch {start_epoch} > Total epochs {EPOCHS}. Training may exit immediately.")
+                print(f"  [TIP] Use --reset-patience to treat 'epochs' as a new phase duration.")
+
+    for epoch in range(start_epoch, target_end_epoch + 1):
         epoch_start = time.time()
         if is_distributed:
             sampler.set_epoch(epoch)
@@ -460,7 +487,7 @@ def main():
         
         if is_main_process(rank):
             epoch_duration = time.time() - epoch_start
-            print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e} ({epoch_duration:.2f}s)")
+            print(f"Epoch {epoch}/{target_end_epoch} loss {avg_loss:.6e} ({epoch_duration:.2f}s)")
             
             # Save resumable checkpoint every N epochs
             if epoch % CHECKPOINT_INTERVAL == 0:
