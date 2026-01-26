@@ -59,7 +59,7 @@ def load_model(model_path, in_channels, device):
         norm='instance_norm',
     ).to(device)
     
-    state_dict = torch.load(model_path, map_location=device)
+    state_dict = torch.load(model_path, map_location=device, weights_only=False)
     model.load_state_dict(state_dict)
     model.eval()
     return model
