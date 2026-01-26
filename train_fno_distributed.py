@@ -2,7 +2,7 @@
 # Usage: torchrun --nproc_per_node=2 train_fno_distributed.py
 #    or: python train_fno_distributed.py (falls back to single GPU)
 
-import os, glob, numpy as np, pandas as pd, torch, hashlib, pickle, sys, argparse
+import os, glob, numpy as np, pandas as pd, torch, hashlib, pickle, sys, argparse, time
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, TensorDataset
