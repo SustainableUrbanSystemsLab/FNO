@@ -27,8 +27,8 @@ n_layers = 5
 
 [loss]
 # Loss function weights (MSE is always 1.0)
-gradient_weight = 0.30  # Increased for sharper building edges
-spectral_weight = 0.0   # Disabled for multi-GPU stability
+gradient_weight = 0.50  # Increased for sharper building edges
+spectral_weight = 0.1   # Enabled to capture high frequency details
 
 [performance]
 # Number of parallel workers for data loading (0 = auto-detect)

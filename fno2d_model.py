@@ -122,7 +122,7 @@ def physics_loss(pred, target, mask=None, grad_weight=0.15, spectral_weight=0.05
     penalty = torch.ones_like(diff)
     # Target > 0 AND Pred > Target (Overshooting high wind)
     high_wind_overshoot = (target > 0) & (diff > 0)
-    penalty[high_wind_overshoot] *= 2.0 
+    penalty[high_wind_overshoot] *= 1.0  # (Was 2.0) Relaxed to allow higher velocities 
     
     mse = (diff**2 * penalty * m).sum() / (m.sum() + 1e-8)
     
