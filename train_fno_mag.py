@@ -80,85 +80,151 @@ if os.path.exists("../epochs"): # Check parent too if being run from subfolder
     try: shutil.rmtree("../epochs", ignore_errors=True)
     except: pass
 
+# ============ Data Loading ============
+import hashlib
+import pickle
+from multiprocessing import Pool, cpu_count
+
+CACHE_FILE = "dataset_cache_fno_mag.pkl"
+NUM_WORKERS = config.get('performance', {}).get('num_workers', 0)
+if NUM_WORKERS == 0:
+    NUM_WORKERS = max(1, cpu_count() - 2)
+
+def load_single_csv(fp):
+    """Load and process a single CSV file."""
+    try:
+        df = pd.read_csv(fp)
+        # Renaming known variations
+        rename_map = {'X': 'X_coords', 'Y': 'Y_coords', 'x': 'X_coords', 'y': 'Y_coords'}
+        df.rename(columns=rename_map, inplace=True)
+
+        cols = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_coords','Y_coords','dir_sin','dir_cos']
+        if any(c not in df.columns for c in cols):
+            return None, f"Missing input columns in {fp}"
+            
+        infer = infer_grid(df['X_coords'].to_numpy(), df['Y_coords'].to_numpy())
+        if infer is None:
+            if FORCE_H is None or FORCE_W is None:
+                return None, f"Grid inference failed for {fp}"
+            nx, ny = FORCE_W, FORCE_H
+            idx_map = [(i//nx, i%nx) for i in range(len(df))]
+        else:
+            nx, ny, idx_map = infer
+
+        gh_out = {c: df[c].tolist() for c in cols}
+        X_tensor, chs = build_input_tensor_from_gh(gh_out, H=ny, W=nx, device='cpu')
+
+        # get mag (dimensionless). accept mag_U or mag_U_dimensionless as already dimensionless
+        mag_cols_dim = ['mag_U_dimensionless','mag_U','mag_dimensionless']
+        mag_vals = None
+        for c in mag_cols_dim:
+            if c in df.columns:
+                mag_vals = df[c].to_numpy().astype(float)
+                break
+        if mag_vals is None:
+            # try compute from dimensionless vector columns
+            if all(cc in df.columns for cc in ['Ux_dimensionless','Uy_dimensionless','Uz_dimensionless']):
+                uxs = df['Ux_dimensionless'].to_numpy().astype(float)
+                uys = df['Uy_dimensionless'].to_numpy().astype(float)
+                uzs = df['Uz_dimensionless'].to_numpy().astype(float)
+                mag_vals = np.sqrt(uxs**2 + uys**2 + uzs**2)
+        if mag_vals is None:
+            return None, f"No dimensionless mag target found in {fp}"
+
+        Y_grid = np.zeros((1, ny, nx), dtype=np.float32) * np.nan
+        mask_grid = np.zeros((1, ny, nx), dtype=np.float32)
+        
+        for i,(iy,ix) in enumerate(idx_map):
+            val = mag_vals[i]
+            # u_over_uref_val = float(df['U_over_Uref'].iloc[i]) # Unused in direct prediction
+            
+            # ✅ Precision Enhancement: Interior Punishment
+            if not np.isfinite(val):
+                val = 0.0              # Target Speed = 0
+                valid_val = 0.2        # Interior punishment weight
+            else:
+                valid_val = 1.0
+            
+            # Target: Absolute Dimensionless Magnitude (Direct Prediction)
+            target_val = np.clip(val, 0.0, 5.0)
+            Y_grid[0, iy, ix] = float(target_val)
+            
+            sensor_w = float(df['is_sensor'].iloc[i]) if 'is_sensor' in df.columns else 1.0
+            sdf_val = max(float(df['SDF'].iloc[i]), 0.0)
+            
+            # ✅ Physics weight: Focal Sharpness
+            sdf_w = 1.0 + 19.0 * np.exp(-sdf_val / 5.0)
+                
+            mask_grid[0, iy, ix] = sensor_w * valid_val * sdf_w
+
+        Y_grid = np.nan_to_num(Y_grid, nan=0.0)
+        return (X_tensor.squeeze(0), torch.from_numpy(Y_grid), torch.from_numpy(mask_grid), chs), None
+        
+    except Exception as e:
+        return None, f"Error processing {fp}: {e}"
+
+def get_cache_hash(files):
+    """Generate a hash based on file list and modifications."""
+    hash_parts = ["fno_mag_direct_pred_v1"] # Version tag to force invalidation on code change
+    hash_input = "".join(sorted([os.path.basename(f) for f in files[::10]])) # Sample files
+    return hashlib.md5((str(len(files)) + hash_input).encode()).hexdigest()
+
+def load_or_prepare_dataset(files, rank, is_main):
+    """Load from cache or prepare dataset with multiprocessing."""
+    cache_hash = get_cache_hash(files)
+    cache_path = f"{CACHE_FILE}.{cache_hash}"
+    
+    if os.path.exists(cache_path):
+        if is_main: print(f"Loading cached dataset from {cache_path}...")
+        try:
+            with open(cache_path, 'rb') as f:
+                return pickle.load(f)
+        except Exception as e:
+            if is_main: print(f"Cache load failed ({e}), rebuilding...")
+    
+    if is_main: print(f"Preparing dataset from {len(files)} files using {NUM_WORKERS} workers...")
+    
+    # Use torch.multiprocessing if available for tensor sharing, else standard
+    # Standard is safer for data loading logic usually
+    with Pool(NUM_WORKERS) as pool:
+        if is_main:
+            results = list(tqdm(pool.imap(load_single_csv, files), total=len(files), desc="Data Preparation"))
+        else:
+            results = list(pool.imap(load_single_csv, files))
+            
+    Xs, Ys, Masks = [], [], []
+    chs = None
+    errors = []
+    
+    for res, err in results:
+        if err:
+            errors.append(err)
+            continue
+        X, Y, M, c = res
+        Xs.append(X)
+        Ys.append(Y)
+        Masks.append(M)
+        if chs is None: chs = c
+        
+    if is_main:
+        print(f"Loaded {len(Xs)} samples. {len(errors)} errors.")
+        if errors and len(errors) < 10: print("Errors:", errors)
+        
+        # Save cache
+        print(f"Saving cache to {cache_path}...")
+        with open(cache_path, 'wb') as f:
+            pickle.dump((Xs, Ys, Masks, chs), f)
+            
+    return Xs, Ys, Masks, chs
 files = sorted(
     glob.glob(os.path.join(DATA_FOLDER, "**", "*.csv"), recursive=True)
 )
-
 if not files: raise RuntimeError("No training files in " + DATA_FOLDER)
-Xs=[]; Ys=[]; Masks=[]
-print("Preparing dataset from", len(files), "files...")
-for fp in tqdm(files, desc="Data Preparation"):
-    df = pd.read_csv(fp)
-    # Renaming known variations
-    rename_map = {'X': 'X_coords', 'Y': 'Y_coords', 'x': 'X_coords', 'y': 'Y_coords'}
-    df.rename(columns=rename_map, inplace=True)
 
-    cols = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_coords','Y_coords','dir_sin','dir_cos']
-    if any(c not in df.columns for c in cols):
-        raise RuntimeError(fp + " missing input columns")
-    infer = infer_grid(df['X_coords'].to_numpy(), df['Y_coords'].to_numpy())
-    if infer is None:
-        if FORCE_H is None or FORCE_W is None:
-            raise RuntimeError("Grid inference failed for " + fp)
-        nx, ny = FORCE_W, FORCE_H
-        idx_map = [(i//nx, i%nx) for i in range(len(df))]
-    else:
-        nx, ny, idx_map = infer
+Xs, Ys, Masks, chs = load_or_prepare_dataset(files, RANK, RANK==0)
 
-    gh_out = {c: df[c].tolist() for c in cols}
-    X_tensor, chs = build_input_tensor_from_gh(gh_out, H=ny, W=nx, device='cpu')
-
-    # get mag (dimensionless). accept mag_U or mag_U_dimensionless as already dimensionless
-    mag_cols_dim = ['mag_U_dimensionless','mag_U','mag_dimensionless']
-    mag_vals = None
-    for c in mag_cols_dim:
-        if c in df.columns:
-            mag_vals = df[c].to_numpy().astype(float)
-            break
-    if mag_vals is None:
-        # try compute from dimensionless vector columns
-        if all(cc in df.columns for cc in ['Ux_dimensionless','Uy_dimensionless','Uz_dimensionless']):
-            uxs = df['Ux_dimensionless'].to_numpy().astype(float)
-            uys = df['Uy_dimensionless'].to_numpy().astype(float)
-            uzs = df['Uz_dimensionless'].to_numpy().astype(float)
-            mag_vals = np.sqrt(uxs**2 + uys**2 + uzs**2)
-    if mag_vals is None:
-        raise RuntimeError("No dimensionless mag target found in " + fp + ". Provide 'mag_U' (dimensionless) or Ux_dimensionless/Uy_dimensionless/Uz_dimensionless.")
-
-    Y_grid = np.zeros((1, ny, nx), dtype=np.float32) * np.nan
-    mask_grid = np.zeros((1, ny, nx), dtype=np.float32)
-    for i,(iy,ix) in enumerate(idx_map):
-        val = mag_vals[i]
-        u_over_uref_val = float(df['U_over_Uref'].iloc[i])
-        
-        # ✅ Precision Enhancement: Interior Punishment
-        # We don't just 'mask' buildings (weight=0). We 'punish' the model if it 
-        # tries to put wind inside them. This forces the boundary to stay sharp.
-        if not np.isfinite(val):
-            val = 0.0              # Target Speed = 0
-            valid_val = 0.2        # Interior punishment weight (prev: 0.0)
-        else:
-            valid_val = 1.0
-        
-        # Target: Absolute Dimensionless Magnitude (Direct Prediction)
-        # Use simple clipping to avoid extreme outliers
-        target_val = np.clip(val, 0.0, 5.0)
-        
-        Y_grid[0, iy, ix] = float(target_val)
-        
-        sensor_w = float(df['is_sensor'].iloc[i]) if 'is_sensor' in df.columns else 1.0
-        sdf_val = max(float(df['SDF'].iloc[i]), 0.0)
-        
-        # ✅ Physics weight: Focal Sharpness
-        # alpha=19.0, L=5.0m (Narrow range focus + 20x surface weight)
-        sdf_w = 1.0 + 19.0 * np.exp(-sdf_val / 5.0)
-            
-        mask_grid[0, iy, ix] = sensor_w * valid_val * sdf_w
-
-    Y_grid = np.nan_to_num(Y_grid, nan=0.0)
-    Xs.append(X_tensor.squeeze(0))
-    Ys.append(torch.from_numpy(Y_grid))
-    Masks.append(torch.from_numpy(mask_grid))
+if len(Xs) == 0:
+    raise RuntimeError("No valid data loaded after filtering errors.")
 
 # Pad tensors to same size (max H, max W) to allow stacking
 max_h = max(t.shape[1] for t in Xs)
