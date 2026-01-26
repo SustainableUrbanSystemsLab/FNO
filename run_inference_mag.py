@@ -1,138 +1,139 @@
-import pandas as pd, numpy as np, torch, os, glob, re
+import os
+import glob
+import torch
+import numpy as np
+import pandas as pd
 from tqdm import tqdm
+
 from gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
 from fno2d_model import FNO2d
 
-# ============ Load Configuration ============
+# ================= CONFIG =================
 CONFIG_FILE = "config.toml"
 
 def load_config():
-    """Load configuration from config.toml file."""
-    import tomllib  # Python 3.11+ built-in
-    
-    config_path = os.path.join(os.path.dirname(__file__), CONFIG_FILE)
-    if os.path.exists(config_path):
-        with open(config_path, 'rb') as f:
+    import tomllib  # Python 3.11+
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, "rb") as f:
             return tomllib.load(f)
-    else:
-        print(f"Warning: {CONFIG_FILE} not found, using defaults")
-        return {}
+    return {}
 
 config = load_config()
 
-# Model architecture from config (must match training!)
-MODES1 = config.get('model', {}).get('modes1', 32)
-MODES2 = config.get('model', {}).get('modes2', 32)
-WIDTH = config.get('model', {}).get('width', 64)
-N_LAYERS = config.get('model', {}).get('n_layers', 5)
+# --- Model architecture (MUST match training) ---
+MODES1   = config.get("model", {}).get("modes1", 64)
+MODES2   = config.get("model", {}).get("modes2", 64)
+WIDTH    = config.get("model", {}).get("width", 96)
+N_LAYERS = config.get("model", {}).get("n_layers", 5)
 
-TEST_FOLDER = config.get('paths', {}).get('test_folder', 'test_csv')
-MODEL_BASE = config.get('paths', {}).get('model_output', 'fno_mag_weights.pth')
+# --- Paths ---
+TEST_FOLDER = config.get("paths", {}).get("test_folder", "test_csv")
+MODEL_PATH  = config.get("paths", {}).get("model_output", "best_model.pth")
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-ROUND = 2
 
-# 1. Use the main model (which is now the BEST model from training)
-model_path = MODEL_BASE
-print(f"Using model: {model_path}")
+print(f"Using device: {DEVICE}")
+print(f"Loading model: {MODEL_PATH}")
 
-# Load model once
+# ================= LOAD MODEL =================
 model = None
 
+# ================= FIND TEST FILES =================
 if not os.path.exists(TEST_FOLDER):
-    print(f"Test folder {TEST_FOLDER} does not exist.")
-    files = []
-else:
-    files = sorted(glob.glob(os.path.join(TEST_FOLDER, "*.csv")))
-    # Exclude _pred.csv files
-    files = [f for f in files if "_pred.csv" not in f]
-    print(f"Found {len(files)} files in {TEST_FOLDER}")
+    raise RuntimeError(f"Test folder not found: {TEST_FOLDER}")
 
-for CSV in tqdm(files, desc="Batch Inference"):
-    out_name = CSV.replace('.csv', '_pred.csv')
-    # print(f"Processing {CSV} -> {out_name}")
-    
+files = sorted(f for f in glob.glob(os.path.join(TEST_FOLDER, "*.csv"))
+               if not f.endswith("_pred.csv"))
+
+print(f"Found {len(files)} test CSV files")
+
+# ================= INFERENCE LOOP =================
+for CSV in tqdm(files, desc="Inference"):
     try:
+        out_csv = CSV.replace(".csv", "_pred.csv")
         df = pd.read_csv(CSV)
-        # Renaming known variations (including backward compat for U_at_z -> U_over_Uref)
-        rename_map = {
-            'X': 'X_coords', 'Y': 'Y_coords', 
-            'x': 'X_coords', 'y': 'Y_coords',
-            'U_at_z': 'U_over_Uref',  # Backward compatibility
-        }
-        df.rename(columns=rename_map, inplace=True)
 
-        cols = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_coords','Y_coords','dir_sin','dir_cos']
-        for c in cols:
+        # --- Standardize column names ---
+        df.rename(columns={
+            "X": "X_coords", "Y": "Y_coords",
+            "x": "X_coords", "y": "Y_coords",
+            "U_at_z": "U_over_Uref"
+        }, inplace=True)
+
+        required = [
+            "SDF", "Bldg_height", "Z_relative",
+            "U_over_Uref", "X_coords", "Y_coords",
+            "dir_sin", "dir_cos"
+        ]
+        for c in required:
             if c not in df.columns:
-                raise RuntimeError(f"Missing input column {c} in {CSV}")
-        
-        gh = {c:df[c].tolist() for c in cols}
-        X, chs = build_input_tensor_from_gh(gh, H=None, W=None, device=DEVICE)
-        
-        # DEBUG: Check if inputs are actually different
-        # Channel 0=SDF, 4=X_norm, 5=Y_norm
-        print(f"  Input Stats:")
-        print(f"    SDF:  min={X[0,0].min():.4f}, max={X[0,0].max():.4f}, mean={X[0,0].mean():.4f}")
-        print(f"    NormX: min={X[0,4].min():.4f}, max={X[0,4].max():.4f}")
-        print(f"    NormY: min={X[0,5].min():.4f}, max={X[0,5].max():.4f}")
+                raise RuntimeError(f"Missing column {c} in {CSV}")
 
-        
-        # Init model if needed
+        # --- Build input tensor ---
+        gh = {c: df[c].to_numpy() for c in required}
+        X, _ = build_input_tensor_from_gh(gh, device=DEVICE)
+
+        # --- Init model once ---
         if model is None:
-            try:
-                in_ch = X.shape[1]
-                # Load architecture from config.toml
-                m = FNO2d(in_channels=in_ch, out_channels=1, modes1=MODES1, modes2=MODES2, width=WIDTH, n_layers=N_LAYERS).to(DEVICE)
-                m.load_state_dict(torch.load(model_path, map_location=DEVICE))
-                m.eval()
-                model = m
-            except RuntimeError as e:
-                if "CUDA out of memory" in str(e) or "out of memory" in str(e):
-                    print(f"GPU OOM, falling back to CPU...")
-                    DEVICE = "cpu"
-                    m = FNO2d(in_channels=in_ch, out_channels=1, modes1=MODES1, modes2=MODES2, width=WIDTH, n_layers=N_LAYERS).to(DEVICE)
-                    m.load_state_dict(torch.load(model_path, map_location=DEVICE))
-                    m.eval()
-                    model = m
-                    X = X.to(DEVICE)
-                else:
-                    print(f"Failed to load model: {e}")
-                    break
-            except Exception as e:
-                print(f"Failed to load model: {e}")
-                break
+            in_ch = X.shape[1]
+            model = FNO2d(
+                in_channels=in_ch,
+                out_channels=1,
+                modes1=MODES1,
+                modes2=MODES2,
+                width=WIDTH,
+                n_layers=N_LAYERS
+            ).to(DEVICE)
 
+            model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+            model.eval()
+
+        # --- Forward pass ---
         with torch.no_grad():
-            pred = model(X.to(DEVICE))
-        
-        mag_star = pred[0, 0].cpu().numpy()
-        nx, ny, _, _, idx_map = infer_grid_from_coords_simple(df['X_coords'], df['Y_coords'])
-        flat = np.array([mag_star[iy, ix] for (iy, ix) in idx_map])
+            pred = model(X)
 
-        # ✅ Enforce physical bounds on predicted deficit
-        flat = np.clip(flat, -1.0, 0.5)
-        
-        # ✅ Quick sanity test
-        print(f"  Pred delta_u stats: min={flat.min():.3f}, mean={flat.mean():.3f}, max={flat.max():.3f}")
+        # ================= POST-PROCESS =================
+        # Model predicts DELTA = (U / U_baseline) - 1
+        delta_grid = pred[0, 0].cpu().numpy()
 
-        # ✅ Reconstruct: mag_U = U_over_Uref * (1 + delta)
-        # (Removed SPEED_TUNE_FACTOR - it was causing offset issues)
-        u_over_uref_series = df['U_over_Uref'].to_numpy()
-        mag_U_final = u_over_uref_series * (1.0 + flat)
+        # Map grid back to flat CSV ordering
+        _, _, _, _, idx_map = infer_grid_from_coords_simple(
+            df["X_coords"], df["Y_coords"]
+        )
 
-        
-        # Save both for debugging
-        df['delta_pred'] = np.round(flat, 4)  # Raw model output (for debugging)
-        df['mag_U'] = np.round(mag_U_final, ROUND)
-        if 'U_ref' in df.columns:
-            Uref = float(df['U_ref'].iloc[0])
-            df['mag_U_pred'] = np.round(mag_U_final * Uref, ROUND)
-        
-        # Rename back to x, y for output consistency
-        df.rename(columns={'X_coords': 'x', 'Y_coords': 'y'}, inplace=True)
-        
-        df.to_csv(out_name, index=False)
+        delta_flat = np.array([delta_grid[iy, ix] for (iy, ix) in idx_map])
+
+        # -------- SANITY PRINTS (keep for now) --------
+        print(f"\n{os.path.basename(CSV)}")
+        print(f"  delta RAW: min={delta_flat.min():.3f}, "
+              f"mean={delta_flat.mean():.3f}, "
+              f"max={delta_flat.max():.3f}")
+
+        baseline = df["U_over_Uref"].to_numpy()
+        mag_raw = baseline * (1.0 + delta_flat)
+
+        print(f"  mag RAW:   min={mag_raw.min():.3f}, "
+              f"mean={mag_raw.mean():.3f}, "
+              f"max={mag_raw.max():.3f}")
+
+        # -------- OPTIONAL SAFETY CLIP (disabled for now) --------
+        # Uncomment ONLY after you verify raw output is reasonable
+        #
+        # delta_flat = np.clip(delta_flat, -0.8, 1.5)
+        # mag_raw = baseline * (1.0 + delta_flat)
+
+        # ================= SAVE OUTPUT =================
+        df["delta_pred"] = delta_flat
+        df["mag_U"] = mag_raw
+
+        if "U_ref" in df.columns:
+            Uref = float(df["U_ref"].iloc[0])
+            df["mag_U_pred"] = mag_raw * Uref
+
+        df.rename(columns={"X_coords": "x", "Y_coords": "y"}, inplace=True)
+        df.to_csv(out_csv, index=False)
+
     except Exception as e:
-        print(f"Failed to process {CSV}: {e}")
+        print(f"FAILED on {CSV}: {e}")
 
-print("Batch inference finished.")
+print("\nInference finished.")

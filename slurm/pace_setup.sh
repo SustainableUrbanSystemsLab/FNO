@@ -3,6 +3,12 @@
 # Setup script for FNO project on PACE
 # Installs uv and prepares the virtual environment
 
+# CRITICAL: Detect and remove Windows virtual environment if uploaded
+if [ -d ".venv/Scripts" ]; then
+    echo "Detected Windows .venv. Removing..."
+    rm -rf .venv
+fi
+
 echo "Checking for uv..."
 
 # Install uv if not in path

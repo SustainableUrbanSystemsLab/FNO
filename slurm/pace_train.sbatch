@@ -23,6 +23,12 @@ cd $SLURM_SUBMIT_DIR
 # Ensure logs directory exists
 mkdir -p logs
 
+# CRITICAL: Detect and remove Windows virtual environment if uploaded
+if [ -d ".venv/Scripts" ]; then
+    echo "Detected Windows .venv (Scripts folder exists). Removing it to create Linux compatible environment..."
+    rm -rf .venv
+fi
+
 # Install uv if not available
 if ! command -v uv &> /dev/null; then
     echo "Installing uv..."
@@ -32,7 +38,7 @@ fi
 
 # Sync dependencies
 echo "Syncing dependencies with uv..."
-uv sync
+uv sync --frozen --no-cache
 
 # Config flag for training script
 CONFIG_FLAG=""

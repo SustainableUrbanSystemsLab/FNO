@@ -384,6 +384,7 @@ def main():
     # Training loop
 
     for epoch in range(start_epoch, EPOCHS + 1):
+        epoch_start = time.time()
         if is_distributed:
             sampler.set_epoch(epoch)
         
@@ -440,7 +441,8 @@ def main():
         avg_spec = running_spec / n_samples
         
         if is_main_process(rank):
-            print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e}")
+            epoch_duration = time.time() - epoch_start
+            print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e} ({epoch_duration:.2f}s)")
             
             # Save resumable checkpoint every N epochs
             if epoch % CHECKPOINT_INTERVAL == 0:
@@ -481,6 +483,7 @@ def main():
                     'gradient_loss': avg_grad,
                     'spectral_loss': avg_spec,
                     'learning_rate': scheduler.get_last_lr()[0],
+                    'epoch_time': epoch_duration,
                     'best_loss': best_loss,
                     'patience': patience_counter,
                 })
