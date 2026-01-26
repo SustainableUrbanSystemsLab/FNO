@@ -57,7 +57,7 @@ WIDTH = config.get('model', {}).get('width', 64)
 N_LAYERS = config.get('model', {}).get('n_layers', 5)
 GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.15)
 SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
-PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0)
+PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0) # Load peak weight
 FORCE_H = None; FORCE_W = None
 
 # Worker count from config (0 = auto-detect)
