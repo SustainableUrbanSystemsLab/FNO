@@ -3,10 +3,10 @@
 # ICE Deployment Wrapper
 # Usage: bash slurm/deploy_ice.sh --gpu [H100|A100] [--ngpus 1|2] [--config config.toml]
 
-GPU_TYPE="h100" # ICE often has H100s or A100s, defaulting to generic if unsure, but user can specify.
+GPU_TYPE="h200" # ICE often has H100s or A100s, defaulting to generic if unsure, but user can specify.
 # Actually on ICE, it's often just partitions. Let's assume user provides gpu type or we default to a100.
 # User didn't specify GPU for ICE, so I'll keep it flexible.
-NUM_GPUS=1
+NUM_GPUS=2
 CONFIG_FILE="config.toml"
 RESET_PATIENCE=""
 
@@ -28,6 +28,7 @@ GPU_TYPE_LOWER=$(echo "$GPU_TYPE" | tr '[:upper:]' '[:lower:]')
 # Map to correct ICE gres names if known, otherwise pass through
 # ICE usually uses standard gres like gpu:h100:1 or gpu:a100:1
 case $GPU_TYPE_LOWER in
+    h200) SLURM_GPU="H200:${NUM_GPUS}" ;;
     h100) SLURM_GPU="H100:${NUM_GPUS}" ;;
     a100) SLURM_GPU="A100:${NUM_GPUS}" ;;
     v100) SLURM_GPU="V100:${NUM_GPUS}" ;;
