@@ -37,10 +37,15 @@ Optional columns:
    
    **Note**: The training script supports sparse/masked grids (where points are missing). Infinite target values are automatically ignored in the loss.
 4. Inference:
-   - Edit `run_inference_mag.py` to set `CSV` path and `MODEL` path if needed.
+   To run inference, use:
+   `run_inference.bat` (Windows)
+   or
+   `python run_inference_neuralop.py` (Linux/macOS)
+   
+   - Edit `run_inference_neuralop.py` to set `CSV` path and `MODEL` path if needed.
    - Run:
    ```bash
-   python run_inference_mag.py
+   python run_inference_neuralop.py
    ```
    Output file `*_mag_pred.csv` will contain `mag_U_pred_dimensionless` (and `mag_U_pred` if `U_ref` exists).
 

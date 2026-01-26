@@ -1,6 +1,6 @@
 @echo off
 REM Run Inference on test_csv folder
-REM Uses run_inference_mag.py
+REM Uses run_inference_neuralop.py
 
 echo ==========================================
 echo  FNO Inference
@@ -12,7 +12,7 @@ REM Activate virtual environment
 call .venv\Scripts\activate.bat
 
 echo Running inference on test_csv folder...
-python run_inference_mag.py
+python run_inference_neuralop.py
 
 echo.
 echo Inference complete!

@@ -112,6 +112,9 @@ for CSV in tqdm(files, desc="Batch Inference"):
         # ✅ Enforce physical bounds on predicted deficit
         flat = np.clip(flat, -1.0, 0.5)
         
+        # ⚠️ TEST: Renormalize by dividing by 5 m/s (remove after testing)
+        # flat = flat / 5.0  # DISABLED: User requested to divide final mag_U instead
+        
         # ✅ Quick sanity test
         print(f"  Pred delta_u stats: min={flat.min():.3f}, mean={flat.mean():.3f}, max={flat.max():.3f}")
 
@@ -120,6 +123,8 @@ for CSV in tqdm(files, desc="Batch Inference"):
         u_over_uref_series = df['U_over_Uref'].to_numpy()
         mag_U_final = u_over_uref_series * (1.0 + flat)
 
+        # ⚠️ TEST: Divide final predicted mag_U by 5
+        mag_U_final = mag_U_final / 5.0
         
         # Save both for debugging
         df['delta_pred'] = np.round(flat, 4)  # Raw model output (for debugging)

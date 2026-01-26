@@ -224,6 +224,7 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='FNO Training')
     parser.add_argument('--fresh', action='store_true', help='Start fresh training (ignore checkpoint)')
+    parser.add_argument('--config', type=str, default='config.toml', help='Config file to use')
     args = parser.parse_args()
     
     local_rank, rank, world_size, is_distributed = setup_distributed()
