@@ -30,6 +30,7 @@ n_layers = 5
 [loss]
 gradient_weight = 0.10
 spectral_weight = 0.20   # Enabled to capture high frequency details
+peak_weight = 1.0        # Top 10% focus
 
 [performance]
 num_workers = 0
