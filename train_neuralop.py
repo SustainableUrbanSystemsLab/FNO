@@ -449,8 +449,8 @@ def main():
             if logger:
                 logger.log_epoch(epoch, {
                     'total_loss': avg_loss,
-                    'l2_loss': avg_l2,
-                    'h1_loss': avg_h1,
+                    'mse_loss': avg_l2,
+                    'gradient_loss': avg_h1,
                     'learning_rate': scheduler.get_last_lr()[0],
                     'best_loss': best_loss,
                     'patience': patience_counter,
