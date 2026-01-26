@@ -291,10 +291,12 @@ def pad_to_max(t_list, h, w):
         padded.append(p)
     return torch.stack(padded, dim=0)
 
-X_all = pad_to_max(Xs, max_h, max_w).to(DEVICE)
-Y_all = pad_to_max(Ys, max_h, max_w).to(DEVICE)
-M_all = pad_to_max(Masks, max_h, max_w).to(DEVICE)
-print("Dataset shapes", X_all.shape, Y_all.shape, M_all.shape)
+# NOTE: DDP & DataLoader with pin_memory require CPU tensors initially.
+# We move them to device ONLY inside the loop or let DataLoader handle pinning.
+X_all = pad_to_max(Xs, max_h, max_w) # Keep on CPU
+Y_all = pad_to_max(Ys, max_h, max_w) # Keep on CPU
+M_all = pad_to_max(Masks, max_h, max_w) # Keep on CPU
+print("Dataset shapes (CPU)", X_all.shape, Y_all.shape, M_all.shape)
 
 # Grouping Strategy:
 # We sort files so that all 8 wind directions for "Case 0" are consecutive, then "Case 1", etc.
@@ -388,7 +390,8 @@ for epoch in range(1, EPOCHS+1):
         pbar = loader
     
     for xb, yb, mb in pbar:
-        xb = xb.float(); yb = yb.float(); mb = mb.float()
+        # Move batch to GPU explicitly
+        xb, yb, mb = xb.to(DEVICE).float(), yb.to(DEVICE).float(), mb.to(DEVICE).float()
         pred = model(xb)
         
         # Pass PEAK_WEIGHT here
