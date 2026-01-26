@@ -232,6 +232,7 @@ def main():
     parser = argparse.ArgumentParser(description='FNO Training')
     parser.add_argument('--fresh', action='store_true', help='Start fresh training (ignore checkpoint)')
     parser.add_argument('--config', type=str, default='config.toml', help='Config file to use')
+    parser.add_argument('--reset-patience', action='store_true', help='Reset best_loss and patience (use when changing loss function)')
     args = parser.parse_args()
     
     local_rank, rank, world_size, is_distributed = setup_distributed()
@@ -253,7 +254,7 @@ def main():
         if os.path.exists("epochs"):
             try: shutil.rmtree("epochs", ignore_errors=True)
             except: pass
-
+ 
     # Load files
     files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**", "*.csv"), recursive=True))
     if not files:
@@ -344,6 +345,14 @@ def main():
         start_epoch = checkpoint['epoch'] + 1
         best_loss = checkpoint['best_loss']
         patience_counter = checkpoint['patience_counter']
+        
+        # Override if reset requested
+        if args.reset_patience:
+            best_loss = float('inf')
+            patience_counter = 0
+            if is_main_process(rank):
+                print("  [INFO] Patience and best_loss RESET via --reset-patience")
+        
         if is_main_process(rank):
             print(f"  Last completed epoch: {checkpoint['epoch']}")
             print(f"  Best loss so far: {best_loss:.6e}")

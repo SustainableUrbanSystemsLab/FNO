@@ -6,13 +6,14 @@
 GPU_TYPE="h200"
 NUM_GPUS=2  # Default to 2 GPUs for distributed training
 CONFIG_FILE="config_medium.toml"  # Default config (medium model with width=96)
+RESET_PATIENCE=""
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
-    case $1 in
         --gpu) GPU_TYPE="$2"; shift ;;
         --ngpus) NUM_GPUS="$2"; shift ;;
         --config) CONFIG_FILE="$2"; shift ;;
+        --reset-patience) RESET_PATIENCE="1" ;;
         *) echo "Unknown parameter passed: $1"; exit 1 ;;
     esac
     shift
@@ -70,7 +71,7 @@ echo "=========================================="
 mkdir -p logs
 
 # Build sbatch command
-SBATCH_CMD="sbatch --gres=gpu:$SLURM_GPU --account=$PACE_ACCOUNT --export=NUM_GPUS=$NUM_GPUS,CONFIG_FILE=$CONFIG_FILE"
+SBATCH_CMD="sbatch --gres=gpu:$SLURM_GPU --account=$PACE_ACCOUNT --export=NUM_GPUS=$NUM_GPUS,CONFIG_FILE=$CONFIG_FILE,RESET_PATIENCE=$RESET_PATIENCE"
 if [ -n "$PACE_PARTITION" ]; then
     SBATCH_CMD="$SBATCH_CMD --partition=$PACE_PARTITION"
 fi

@@ -46,6 +46,13 @@ if [ -n "${CONFIG_FILE}" ]; then
     CONFIG_FLAG="--config ${CONFIG_FILE}"
 fi
 
+# Reset Patience Flag
+RESET_FLAG=""
+if [ -n "${RESET_PATIENCE}" ]; then
+    echo "Resetting patience requested via environment variable."
+    RESET_FLAG="--reset-patience"
+fi
+
 # Execute training based on GPU count
 if [ "${NUM_GPUS:-1}" -gt 1 ]; then
     # Use random port to avoid conflicts on shared nodes
@@ -56,10 +63,10 @@ if [ "${NUM_GPUS:-1}" -gt 1 ]; then
     export NCCL_IB_DISABLE=0            # Enable InfiniBand if available
     
     echo "Starting DISTRIBUTED training with ${NUM_GPUS} GPUs on port ${MASTER_PORT}..."
-    uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_fno_distributed.py ${CONFIG_FLAG}
+    uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_fno_distributed.py ${CONFIG_FLAG} ${RESET_FLAG}
 else
     echo "Starting SINGLE-GPU training..."
-    uv run python train_fno_distributed.py ${CONFIG_FLAG}
+    uv run python train_fno_distributed.py ${CONFIG_FLAG} ${RESET_FLAG}
 fi
 
 echo "Job finished on $(date)"
