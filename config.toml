@@ -42,3 +42,8 @@ num_workers = 0
 account = "gts-pkastner3"
 # Partition (leave empty for default)
 partition = ""
+
+[ice]
+# ICE cluster configuration
+account = "coa"
+partition = "" # Optional, add if needed
