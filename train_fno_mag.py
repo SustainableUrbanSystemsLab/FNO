@@ -34,7 +34,7 @@ else:
     DATA_FOLDER = config.get('paths', {}).get('data_folder_linux', 'train_csv')
 
 MODEL_OUT = config.get('paths', {}).get('model_output', 'fno_mag_weights.pth')
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# DEVICE = "cuda" if torch.cuda.is_available() else "cpu" # defined in distributed setup now
 BATCH = config.get('training', {}).get('batch_size', 4)
 EPOCHS = config.get('training', {}).get('epochs', 200)
 LR = config.get('training', {}).get('learning_rate', 1e-3)
@@ -42,6 +42,21 @@ MODES1 = config.get('model', {}).get('modes1', 32)
 MODES2 = config.get('model', {}).get('modes2', 32)
 WIDTH = config.get('model', {}).get('width', 64)
 N_LAYERS = config.get('model', {}).get('n_layers', 5)
+
+# ============ Distributed Setup ============
+def setup_distributed():
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        rank = int(os.environ['RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        local_rank = int(os.environ.get('LOCAL_RANK', 0))
+        dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
+        torch.cuda.set_device(local_rank)
+        print(f"Distributed: True | Rank {rank}/{world_size}")
+        return rank, world_size, local_rank, True
+    return 0, 1, 0, False
+
+RANK, WORLD_SIZE, LOCAL_RANK, IS_DISTRIBUTED = setup_distributed()
+DEVICE = f"cuda:{LOCAL_RANK}" if torch.cuda.is_available() else "cpu"
 
 # ============ Load Logger ============
 from training_logger import TrainingLogger
@@ -256,20 +271,7 @@ print("Dataset shapes", X_all.shape, Y_all.shape, M_all.shape)
 # This ensures each training step sees ALL directions for ONE building geometry.
 # This forces the model to learn how the fixed geometry interacts with changing wind.
 
-# ============ Distributed Setup ============
-def setup_distributed():
-    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        rank = int(os.environ['RANK'])
-        world_size = int(os.environ['WORLD_SIZE'])
-        local_rank = int(os.environ.get('LOCAL_RANK', 0))
-        dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
-        torch.cuda.set_device(local_rank)
-        print(f"Distributed: True | Rank {rank}/{world_size}")
-        return rank, world_size, local_rank, True
-    return 0, 1, 0, False
 
-RANK, WORLD_SIZE, LOCAL_RANK, IS_DISTRIBUTED = setup_distributed()
-DEVICE = f"cuda:{LOCAL_RANK}" if torch.cuda.is_available() else "cpu"
 
 dataset = TensorDataset(X_all, Y_all, M_all)
 
