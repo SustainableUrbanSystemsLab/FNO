@@ -1,0 +1,39 @@
+# FNO Training Configuration - MEDIUM MODEL
+# Increased capacity to test if current model is capacity-limited
+# Expected: ~1.7x slower per epoch, but should break 0.35 barrier
+
+[paths]
+# Training data paths - script auto-detects platform
+data_folder_windows = "C:/LabShare/Dataset/FormFluxCases/Compressed/Training_Dataset"
+data_folder_linux = "/storage/coda1/p-pkastner3/0/ikaradag3/FNO/Training_Dataset"
+
+# Path to test CSV files for inference
+test_folder = 'test_csv'
+
+# Output model filename
+model_output = "fno_mag_weights.pth"
+
+[training]
+batch_size = 4
+epochs = 200            # Fewer epochs for quick capacity test
+learning_rate = 0.0005
+patience = 50           # Shorter patience for faster feedback
+checkpoint_interval = 10  # More frequent checkpoints for testing
+
+[model]
+# INCREASED CAPACITY
+modes1 = 48  # Keep same - already high
+modes2 = 48
+width = 96   # INCREASED from 64 -> 96 (1.5x more channels)
+n_layers = 5
+
+[loss]
+gradient_weight = 0.30
+spectral_weight = 0.0   # Keep disabled for stability
+
+[performance]
+num_workers = 0
+
+[pace]
+account = "gts-pkastner3"
+partition = ""

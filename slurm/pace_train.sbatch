@@ -4,16 +4,18 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=128G
-#SBATCH -t 4:00:00
+#SBATCH -t 1:00:00
 #SBATCH -o logs/fno_%j.out
 #SBATCH -e logs/fno_%j.err
 
 # Note: --gres=gpu:xxx:N is passed from the deploy_pace.sh script
 # NUM_GPUS is also passed via --export
+# CONFIG_FILE can be passed to use a different config (e.g., config_medium.toml)
 
 echo "Job started on $(date)"
 echo "Running on node $(hostname)"
 echo "Number of GPUs: ${NUM_GPUS:-1}"
+echo "Config file: ${CONFIG_FILE:-config.toml}"
 
 # Go to the directory where sbatch was submitted from
 cd $SLURM_SUBMIT_DIR
@@ -32,6 +34,12 @@ fi
 echo "Syncing dependencies with uv..."
 uv sync
 
+# Config flag for training script
+CONFIG_FLAG=""
+if [ -n "${CONFIG_FILE}" ]; then
+    CONFIG_FLAG="--config ${CONFIG_FILE}"
+fi
+
 # Execute training based on GPU count
 if [ "${NUM_GPUS:-1}" -gt 1 ]; then
     # Use random port to avoid conflicts on shared nodes
@@ -42,10 +50,10 @@ if [ "${NUM_GPUS:-1}" -gt 1 ]; then
     export NCCL_IB_DISABLE=0            # Enable InfiniBand if available
     
     echo "Starting DISTRIBUTED training with ${NUM_GPUS} GPUs on port ${MASTER_PORT}..."
-    uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_neuralop.py
+    uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_fno_distributed.py ${CONFIG_FLAG}
 else
     echo "Starting SINGLE-GPU training..."
-    uv run python train_neuralop.py
+    uv run python train_fno_distributed.py ${CONFIG_FLAG}
 fi
 
 echo "Job finished on $(date)"

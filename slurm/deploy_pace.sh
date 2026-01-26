@@ -1,16 +1,18 @@
 #!/bin/bash
 
 # Georgia Tech PACE Deployment Wrapper
-# Usage: bash slurm/deploy_pace.sh --gpu [H200|RTX6000] [--ngpus 1|2]
+# Usage: bash slurm/deploy_pace.sh --gpu [H200|RTX6000] [--ngpus 1|2] [--config config_medium.toml]
 
 GPU_TYPE="h200"
 NUM_GPUS=2  # Default to 2 GPUs for distributed training
+CONFIG_FILE="config_medium.toml"  # Default config (medium model with width=96)
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --gpu) GPU_TYPE="$2"; shift ;;
         --ngpus) NUM_GPUS="$2"; shift ;;
+        --config) CONFIG_FILE="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; exit 1 ;;
     esac
     shift
@@ -40,8 +42,7 @@ case $GPU_TYPE_LOWER in
         ;;
 esac
 
-# Read PACE config from config.toml
-CONFIG_FILE="config.toml"
+# Read PACE config from the specified config file
 if [ -f "$CONFIG_FILE" ]; then
     PACE_ACCOUNT=$(grep -E "^account\s*=" "$CONFIG_FILE" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
     PACE_PARTITION=$(grep -E "^partition\s*=" "$CONFIG_FILE" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
@@ -53,14 +54,15 @@ fi
 
 # Validate account
 if [ -z "$PACE_ACCOUNT" ]; then
-    echo "Error: PACE account not set in config.toml"
-    echo "Edit config.toml and set: account = \"gts-yourusername\""
+    echo "Error: PACE account not set in $CONFIG_FILE"
+    echo "Edit $CONFIG_FILE and set: account = \"gts-yourusername\""
     exit 1
 fi
 
 echo "=========================================="
 echo " Preparing PACE Deployment"
 echo " GPU Requested: $GPU_TYPE x $NUM_GPUS ($SLURM_GPU)"
+echo " Config file: $CONFIG_FILE"
 echo " Account: $PACE_ACCOUNT"
 echo "=========================================="
 
@@ -68,7 +70,7 @@ echo "=========================================="
 mkdir -p logs
 
 # Build sbatch command
-SBATCH_CMD="sbatch --gres=gpu:$SLURM_GPU --account=$PACE_ACCOUNT --export=NUM_GPUS=$NUM_GPUS"
+SBATCH_CMD="sbatch --gres=gpu:$SLURM_GPU --account=$PACE_ACCOUNT --export=NUM_GPUS=$NUM_GPUS,CONFIG_FILE=$CONFIG_FILE"
 if [ -n "$PACE_PARTITION" ]; then
     SBATCH_CMD="$SBATCH_CMD --partition=$PACE_PARTITION"
 fi

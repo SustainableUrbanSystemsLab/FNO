@@ -14,7 +14,13 @@ from gh_to_fno import build_input_tensor_from_gh
 from training_logger import TrainingLogger
 
 # ============ Load Configuration ============
-CONFIG_FILE = "config.toml"
+import argparse
+
+# Pre-parse just the --config argument (before main argparse in main())
+_pre_parser = argparse.ArgumentParser(add_help=False)
+_pre_parser.add_argument('--config', type=str, default='config.toml', help='Config file to use')
+_pre_args, _ = _pre_parser.parse_known_args()
+CONFIG_FILE = _pre_args.config
 
 def load_config():
     """Load configuration from config.toml file."""
