@@ -28,8 +28,8 @@ width = 96   # INCREASED from 64 -> 96 (1.5x more channels)
 n_layers = 5
 
 [loss]
-gradient_weight = 0.30
-spectral_weight = 0.0   # Keep disabled for stability
+gradient_weight = 0.10
+spectral_weight = 0.20   # Enabled to capture high frequency details
 
 [performance]
 num_workers = 0
