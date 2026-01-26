@@ -132,7 +132,7 @@ for fp in tqdm(files, desc="Data Preparation"):
         
         # Target: Deficit relative to local inlet profile
         delta_u_normalized = (val - u_over_uref_val) / (u_over_uref_val + 1e-6)
-        delta_u_normalized = np.clip(delta_u_normalized, -1.0, 0.5)
+        delta_u_normalized = np.clip(delta_u_normalized, -1.0, 5.0)
         
         Y_grid[0, iy, ix] = float(delta_u_normalized)
         
