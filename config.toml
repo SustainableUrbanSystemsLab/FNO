@@ -28,7 +28,7 @@ n_layers = 5
 [loss]
 # Loss function weights (MSE is always 1.0)
 gradient_weight = 0.15  # Restored/Standard (0.1-0.2)
-spectral_weight = 0.25  # Increased (0.15-0.25 range requested)
+spectral_weight = 0.20  # Increased (0.15-0.25 range requested)
 peak_weight = 1.0       # NEW: Peak-Aware Loss (Top 10%)
 
 [performance]

@@ -82,11 +82,11 @@ class TrainingLogger:
         """Initialize CSV file with headers."""
         self.csv_file = open(self.metrics_csv, 'w', newline='')
         self.csv_writer = csv.writer(self.csv_file)
-        headers = [
+        self.fieldnames = [
             'epoch', 'total_loss', 'mse_loss', 'gradient_loss', 'spectral_loss', 'peak_loss',
             'learning_rate', 'epoch_time_sec', 'best_loss', 'patience_counter'
         ]
-        self.csv_writer.writerow(headers)
+        self.csv_writer.writerow(self.fieldnames)
         self.csv_file.flush()
         
     def log_epoch(self, epoch: int, metrics: Dict[str, float]):
@@ -97,18 +97,14 @@ class TrainingLogger:
             metrics: Dictionary with keys like 'total_loss', 'mse_loss', 'gradient_loss', 
                     'spectral_loss', 'peak_loss', 'learning_rate', 'epoch_time', 'best_loss', 'patience'
         """
-        row = [
-            epoch,
-            metrics.get('total_loss', 0.0),
-            metrics.get('mse_loss', 0.0),
-            metrics.get('gradient_loss', 0.0),
-            metrics.get('spectral_loss', 0.0),
-            metrics.get('peak_loss', 0.0),
-            metrics.get('learning_rate', 0.0),
-            metrics.get('epoch_time', 0.0),
-            metrics.get('best_loss', 0.0),
-            metrics.get('patience', 0)
-        ]
+        # Prepare row
+        row = [int(epoch)]
+        for k in self.fieldnames[1:]:
+            val = metrics.get(k, 0.0)
+            if isinstance(val, (int, float)):
+                val = round(val, 6)
+            row.append(val)
+            
         self.csv_writer.writerow(row)
         self.csv_file.flush()
         self.epoch_metrics.append(metrics)

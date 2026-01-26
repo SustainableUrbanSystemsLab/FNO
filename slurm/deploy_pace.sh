@@ -5,7 +5,7 @@
 
 GPU_TYPE="h200"
 NUM_GPUS=2  # Default to 2 GPUs for distributed training
-CONFIG_FILE="config_medium.toml"  # Default config (medium model with width=96)
+CONFIG_FILE="config.toml"  # Default config (medium model with width=96)
 RESET_PATIENCE=""
 
 # Parse arguments
