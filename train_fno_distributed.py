@@ -45,7 +45,7 @@ else:
 
 MODEL_OUT = config.get('paths', {}).get('model_output', 'fno_mag_weights.pth')
 CHECKPOINT_PATH = config.get('paths', {}).get('checkpoint_file', 'checkpoint_latest.pth')
-CACHE_FILE = "dataset_cache.pkl"
+CACHE_FILE = "dataset_cache_neuralop.pkl"
 BATCH = config.get('training', {}).get('batch_size', 4)
 EPOCHS = config.get('training', {}).get('epochs', 200)
 LR = config.get('training', {}).get('learning_rate', 1e-3)
@@ -177,15 +177,22 @@ def get_cache_hash(files):
 
 def load_or_prepare_dataset(files, rank, is_main):
     """Load from cache or prepare dataset with multiprocessing."""
-    cache_hash = get_cache_hash(files)
-    cache_path = f"{CACHE_FILE}.{cache_hash}"
+    # Try to find ANY existing cache first
+    existing_caches = glob.glob(f"{CACHE_FILE}*")
     
-    # Try to load from cache
-    if os.path.exists(cache_path):
+    if existing_caches:
+        cache_path = existing_caches[0]
         if is_main:
             print(f"Loading cached dataset from {cache_path}...")
-        with open(cache_path, 'rb') as f:
-            return pickle.load(f)
+        try:
+            with open(cache_path, 'rb') as f:
+                return pickle.load(f)
+        except Exception as e:
+            if is_main:
+                print(f"Failed to load cache {cache_path}: {e}")
+    
+    # If no cache found, define new cache path (simple name to be robust)
+    cache_path = CACHE_FILE
     
     # Prepare dataset with multiprocessing
     if is_main:
