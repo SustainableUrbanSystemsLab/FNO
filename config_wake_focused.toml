@@ -1,0 +1,69 @@
+# Configuration for Wake-Focused FNO Training
+# Optimized to capture sharp gradients and preserve flow extremes
+
+[paths]
+data_folder_windows = "train_csv"
+data_folder_linux = "train_csv"
+model_output = "fno_wake_weights.pth"
+checkpoint_file = "checkpoint_wake.pth"
+
+[training]
+batch_size = 4
+epochs = 200
+learning_rate = 3e-3           # Higher LR to escape smooth local minimum
+patience = 50
+checkpoint_interval = 10
+min_lr = 1e-5                  # Prevent LR decay to zero
+warmup_epochs = 5              # Gradual LR warmup
+
+[model]
+modes1 = 48                     # Increased from 32 - more high-frequency modes
+modes2 = 48                     # Increased from 32
+width = 96                      # Increased from 64 - more capacity
+n_layers = 6                    # Increased from 5 - deeper network
+
+[loss]
+# CRITICAL CHANGES - Rebalanced for sharp feature capture
+gradient_weight = 1.5           # 10x increase from 0.15 - sharp boundaries
+spectral_weight = 0.001         # 50x decrease from 0.05 - reduce smoothing
+peak_weight = 0.5               # Enabled from 0.0 - preserve extremes
+wake_weight = 0.3               # NEW - focus on wake regions
+
+[performance]
+num_workers = 0                 # Auto-detect based on CPU count
+
+# Explanation of Changes:
+# ========================
+# 
+# 1. gradient_weight: 0.15 → 1.5
+#    - Forces model to maintain sharp velocity gradients
+#    - Essential for wake boundaries behind buildings
+#
+# 2. spectral_weight: 0.05 → 0.001
+#    - Your spectral loss was ~0.20, completely dominating training
+#    - Reduced to allow model to learn high-frequency features
+#    - Prevents over-smoothing in frequency domain
+#
+# 3. peak_weight: 0.0 → 0.5
+#    - Now explicitly preserves high/low wind speed extremes
+#    - Critical for red (high) and dark blue (low) regions
+#
+# 4. wake_weight: NEW 0.3
+#    - Additional focus on low-speed wake regions
+#    - Requires code modification (see fno2d_model.py updates)
+#
+# 5. Model capacity increased:
+#    - More Fourier modes capture finer spatial details
+#    - Wider/deeper network handles complex geometries
+#
+# 6. Learning rate increased:
+#    - Your model was stuck with LR = 1e-6
+#    - Fresh start with 3e-3 allows exploration
+#    - min_lr prevents complete decay
+
+# Training Strategy:
+# ==================
+# Run with: python train_fno_distributed.py --fresh --config config_wake_focused.toml
+#
+# The --fresh flag is CRITICAL - don't load old checkpoint
+# Your model is stuck in a smooth-solution local minimum

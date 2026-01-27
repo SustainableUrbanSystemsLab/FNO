@@ -1,71 +1,13 @@
+"""
+Modified loss function additions for fno2d_model.py
+
+Add these functions to your fno2d_model.py file to implement wake-aware training.
+This will help the model focus on correctly predicting low-speed wake regions.
+"""
+
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
-class SpectralConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, modes1, modes2):
-        super().__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.modes1 = modes1
-        self.modes2 = modes2
-        self.scale = 1 / (in_channels * out_channels)
-        self.weights1 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, modes1, modes2, dtype=torch.complex64))
-        self.weights2 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, modes1, modes2, dtype=torch.complex64))
-
-    def compl_mul2d(self, input, weights):
-        # (batch, in_channel, x, y), (in_channel, out_channel, x, y) -> (batch, out_channel, x, y)
-        return torch.einsum("bixy,ioxy->boxy", input, weights)
-
-    def forward(self, x):
-        batchsize = x.shape[0]
-        # Compute Fourier transform
-        x_ft = torch.fft.rfft2(x)
-
-        # Multiply relevant Fourier modes
-        out_ft = torch.zeros(batchsize, self.out_channels, x.size(-2), x.size(-1)//2 + 1, dtype=torch.complex64, device=x.device)
-        out_ft[:, :, :self.modes1, :self.modes2] = \
-            self.compl_mul2d(x_ft[:, :, :self.modes1, :self.modes2], self.weights1)
-        out_ft[:, :, -self.modes1:, :self.modes2] = \
-            self.compl_mul2d(x_ft[:, :, -self.modes1:, :self.modes2], self.weights2)
-
-        # Return to spatial domain
-        x = torch.fft.irfft2(out_ft, s=(x.size(-2), x.size(-1)))
-        return x
-
-class FNO2d(nn.Module):
-    def __init__(self, in_channels, out_channels, modes1=16, modes2=16, width=64, n_layers=4):
-        super().__init__()
-        self.width = width
-        self.in_proj = nn.Conv2d(in_channels, width, kernel_size=1)
-        
-        self.spectral_layers = nn.ModuleList([SpectralConv2d(width, width, modes1, modes2) for _ in range(n_layers)])
-        self.spatial_layers = nn.ModuleList([nn.Conv2d(width, width, kernel_size=3, padding=1) for _ in range(n_layers)])
-        
-        self.activation = nn.GELU()
-        self.out_proj = nn.Sequential(
-            nn.Conv2d(width, 128, kernel_size=1),
-            nn.GELU(),
-            nn.Conv2d(128, out_channels, kernel_size=1)
-        )
-        self._init_weights()
-
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-
-    def forward(self, x):
-        x = self.in_proj(x)
-        for spec, spat in zip(self.spectral_layers, self.spatial_layers):
-            x1 = spec(x)
-            x2 = spat(x)
-            x = x + x1 + x2
-            x = self.activation(x)
-        out = self.out_proj(x)
-        return out
 
 def compute_wake_loss(y_pred, y_target, sensor_mask, wake_threshold=0.3):
     """
@@ -112,6 +54,8 @@ def compute_peak_loss(y_pred, y_target, sensor_mask, percentile=90):
     """
     # Flatten for percentile computation
     flat_target = y_target.flatten()
+    flat_pred = y_pred.flatten()
+    flat_mask = sensor_mask.flatten()
     
     # Get high and low thresholds
     high_threshold = torch.quantile(flat_target, percentile / 100.0)
@@ -163,15 +107,7 @@ def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
         sensor_mask = torch.ones_like(y_pred)
     
     # === 1. MSE Loss (Base) ===
-    # Precision Fix: Acceleration Curb (Moved from physics_loss mechanism)
-    # If the target is acceleration (>0) and we over-predict it, punish harder.
-    diff = y_pred - y_target
-    penalty = torch.ones_like(diff)
-    # Target > 0 AND Pred > Target (Overshooting high wind)
-    high_wind_overshoot = (y_target > 0) & (diff > 0)
-    penalty[high_wind_overshoot] *= 1.0  # Relaxed from previous versions
-
-    mse_loss = ((diff**2 * penalty) * sensor_mask).sum() / (sensor_mask.sum() + 1e-8)
+    mse_loss = (sensor_mask * (y_pred - y_target) ** 2).sum() / sensor_mask.sum()
     
     # === 2. Gradient Loss (Spatial) ===
     gradient_loss = torch.tensor(0.0, device=y_pred.device)
@@ -231,3 +167,86 @@ def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
         return total_loss, components
     
     return total_loss
+
+
+# ============================================================================
+# ALTERNATIVE: Enhanced Data Weighting (Add to process_single_file)
+# ============================================================================
+"""
+Add this code to train_fno_distributed.py in the process_single_file function
+after line 151 where delta_u_normalized is computed:
+
+```python
+# Detect wake regions (low normalized velocity behind buildings)
+is_wake = (val < 0.3 * u_over_uref_val) and (sdf_val > 2.0 and sdf_val < 20.0)
+is_acceleration = (val > 1.5 * u_over_uref_val) and (sdf_val > 0.5)
+
+# Additional weighting for critical regions
+wake_weight = 5.0 if is_wake else 1.0
+accel_weight = 3.0 if is_acceleration else 1.0
+critical_weight = wake_weight * accel_weight
+
+# Modify mask computation (replace line 158)
+mask_grid[0, iy, ix] = sensor_w * valid_val * sdf_w * critical_weight
+```
+
+This gives 5x weight to wake regions and 3x weight to acceleration zones,
+helping the model focus on the areas you care most about.
+"""
+
+
+# ============================================================================
+# USAGE INSTRUCTIONS
+# ============================================================================
+"""
+1. Update fno2d_model.py:
+   - Replace the sensor_weighted_mse function with the version above
+   - Add compute_wake_loss and compute_peak_loss functions
+
+2. Update config_wake_focused.toml:
+   - Set wake_weight = 0.3 in [loss] section
+
+3. Update train_fno_distributed.py:
+   - Add WAKE_WEIGHT loading from config (around line 60):
+     WAKE_WEIGHT = config.get('loss', {}).get('wake_weight', 0.0)
+   
+   - Modify loss computation (around line 445):
+     loss, components = sensor_weighted_mse(
+         pred, yb, sensor_mask=mb,
+         grad_weight=GRAD_WEIGHT,
+         spectral_weight=SPECTRAL_WEIGHT,
+         peak_weight=PEAK_WEIGHT,
+         wake_weight=WAKE_WEIGHT,  # ADD THIS
+         return_components=True
+     )
+   
+   - Add wake_loss to logging (around line 437):
+     running_wake = 0.0
+   
+   - Track wake loss (around line 459):
+     running_wake += components.get('wake_loss', 0.0) * batch_size
+   
+   - Aggregate wake loss for distributed (around line 474):
+     running_tensor = torch.tensor([running, running_mse, running_grad, 
+                                    running_spec, running_peak, running_wake], device=device)
+   
+   - Log wake loss (around line 525):
+     logger.log_epoch(epoch, {
+         'total_loss': avg_loss,
+         'mse_loss': avg_mse,
+         'gradient_loss': avg_grad,
+         'spectral_loss': avg_spec,
+         'peak_loss': avg_peak,
+         'wake_loss': avg_wake,  # ADD THIS
+         ...
+     })
+
+4. Train with new config:
+   python train_fno_distributed.py --fresh --config config_wake_focused.toml
+
+5. Monitor training:
+   - wake_loss should be ~0.01-0.05
+   - gradient_loss should increase (0.05-0.10) - this is good!
+   - spectral_loss should decrease (0.001-0.005)
+   - mse_loss should decrease (0.005-0.010)
+"""

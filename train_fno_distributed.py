@@ -57,7 +57,8 @@ WIDTH = config.get('model', {}).get('width', 64)
 N_LAYERS = config.get('model', {}).get('n_layers', 5)
 GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.15)
 SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
-PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0) # Load peak weight
+PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0)
+WAKE_WEIGHT = config.get('loss', {}).get('wake_weight', 0.0) # Load wake weight
 FORCE_H = None; FORCE_W = None
 
 # Worker count from config (0 = auto-detect)
@@ -435,6 +436,7 @@ def main():
         running_grad = 0.0
         running_spec = 0.0
         running_peak = 0.0
+        running_wake = 0.0
         
         for xb, yb, mb in pbar:
             xb = xb.float().to(device)
@@ -446,6 +448,7 @@ def main():
                                                 grad_weight=GRAD_WEIGHT, 
                                                 spectral_weight=SPECTRAL_WEIGHT,
                                                 peak_weight=PEAK_WEIGHT,
+                                                wake_weight=WAKE_WEIGHT,
                                                 return_components=True)
             opt.zero_grad()
             loss.backward()
@@ -457,6 +460,7 @@ def main():
             running_grad += components['gradient_loss'] * batch_size
             running_spec += components['spectral_loss'] * batch_size
             running_peak += components.get('peak_loss', 0.0) * batch_size
+            running_wake += components.get('wake_loss', 0.0) * batch_size
             
             if is_main_process(rank) and hasattr(pbar, 'set_postfix'):
                 pbar.set_postfix({"loss": f"{loss.item():.4e}"})
@@ -471,19 +475,21 @@ def main():
             dist.barrier()
             
             # Aggregate all loss components across GPUs
-            running_tensor = torch.tensor([running, running_mse, running_grad, running_spec, running_peak], device=device)
+            running_tensor = torch.tensor([running, running_mse, running_grad, running_spec, running_peak, running_wake], device=device)
             dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
             running = running_tensor[0].item()
             running_mse = running_tensor[1].item()
             running_grad = running_tensor[2].item()
             running_spec = running_tensor[3].item()
             running_peak = running_tensor[4].item()
+            running_wake = running_tensor[5].item()
         
         avg_loss = running / n_samples
         avg_mse = running_mse / n_samples
         avg_grad = running_grad / n_samples
         avg_spec = running_spec / n_samples
         avg_peak = running_peak / n_samples
+        avg_wake = running_wake / n_samples
         
         if is_main_process(rank):
             epoch_duration = time.time() - epoch_start
@@ -528,6 +534,7 @@ def main():
                     'gradient_loss': avg_grad,
                     'spectral_loss': avg_spec,
                     'peak_loss': avg_peak,
+                    'wake_loss': avg_wake,
                     'learning_rate': scheduler.get_last_lr()[0],
                     'epoch_time': epoch_duration,
                     'best_loss': best_loss,

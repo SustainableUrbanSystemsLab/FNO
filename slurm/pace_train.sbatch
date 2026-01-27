@@ -53,6 +53,13 @@ if [ -n "${RESET_PATIENCE}" ]; then
     RESET_FLAG="--reset-patience"
 fi
 
+# Fresh Train Flag
+FRESH_FLAG=""
+if [ -n "${FRESH_TRAIN}" ]; then
+    echo "Fresh training requested via environment variable."
+    FRESH_FLAG="--fresh"
+fi
+
 # Execute training based on GPU count
 if [ "${NUM_GPUS:-1}" -gt 1 ]; then
     # Use random port to avoid conflicts on shared nodes
@@ -63,10 +70,10 @@ if [ "${NUM_GPUS:-1}" -gt 1 ]; then
     export NCCL_IB_DISABLE=0            # Enable InfiniBand if available
     
     echo "Starting DISTRIBUTED training with ${NUM_GPUS} GPUs on port ${MASTER_PORT}..."
-    uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_fno_mag.py ${CONFIG_FLAG} ${RESET_FLAG}
+    uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_fno_distributed.py ${CONFIG_FLAG} ${RESET_FLAG} ${FRESH_FLAG}
 else
     echo "Starting SINGLE-GPU training..."
-    uv run python train_fno_mag.py ${CONFIG_FLAG} ${RESET_FLAG}
+    uv run python train_fno_distributed.py ${CONFIG_FLAG} ${RESET_FLAG} ${FRESH_FLAG}
 fi
 
 echo "Job finished on $(date)"

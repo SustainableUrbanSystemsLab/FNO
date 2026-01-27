@@ -9,6 +9,7 @@ GPU_TYPE="h200" # ICE often has H100s or A100s, defaulting to generic if unsure,
 NUM_GPUS=2
 CONFIG_FILE="config.toml"
 RESET_PATIENCE=""
+FRESH_TRAIN=""
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
@@ -17,6 +18,7 @@ while [[ "$#" -gt 0 ]]; do
         --ngpus) NUM_GPUS="$2"; shift ;;
         --config) CONFIG_FILE="$2"; shift ;;
         --reset-patience) RESET_PATIENCE="1" ;;
+        --fresh) FRESH_TRAIN="1" ;;
         *) echo "Unknown parameter passed: $1"; exit 1 ;;
     esac
     shift
@@ -62,7 +64,7 @@ mkdir -p logs
 
 # Build sbatch command
 # Note: ICE might need specific partition if gpu is not default
-SBATCH_CMD="sbatch --gres=gpu:$SLURM_GPU --account=$ICE_ACCOUNT --export=NUM_GPUS=$NUM_GPUS,CONFIG_FILE=$CONFIG_FILE,RESET_PATIENCE=$RESET_PATIENCE"
+SBATCH_CMD="sbatch --gres=gpu:$SLURM_GPU --account=$ICE_ACCOUNT --export=NUM_GPUS=$NUM_GPUS,CONFIG_FILE=$CONFIG_FILE,RESET_PATIENCE=$RESET_PATIENCE,FRESH_TRAIN=$FRESH_TRAIN"
 
 if [ -n "$ICE_PARTITION" ]; then
     SBATCH_CMD="$SBATCH_CMD --partition=$ICE_PARTITION"
