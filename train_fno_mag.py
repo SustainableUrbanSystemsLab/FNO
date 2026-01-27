@@ -474,7 +474,7 @@ for epoch in range(start_epoch, EPOCHS+1):
             
     # Check for improvement (Early Stopping)
     if avg_loss < best_loss:
-        # best_loss updated above
+        best_loss = avg_loss
         patience_counter = 0
         # Save BEST model to main file
         # Atomic save: save to temp and rename to prevent corruption
