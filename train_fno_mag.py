@@ -315,18 +315,24 @@ elif torch.cuda.device_count() > 1:
     model = nn.DataParallel(model)
 
 # Resume from checkpoint if available
+# Resume from checkpoint if available
+CHECKPOINT_FILE = "checkpoint.pth"
 start_epoch = 1
-if os.path.exists(MODEL_OUT):
-    print(f"Resuming from checkpoint: {MODEL_OUT}")
+
+if os.path.exists(CHECKPOINT_FILE):
+    print(f"Resuming from internal checkpoint: {CHECKPOINT_FILE}")
+    state_dict = torch.load(CHECKPOINT_FILE, map_location=DEVICE)
+    model.load_state_dict(state_dict)
+elif os.path.exists(MODEL_OUT):
+    print(f"Resuming from best model: {MODEL_OUT}")
     # Map location is critical on DDP to avoid device mismatch
     state_dict = torch.load(MODEL_OUT, map_location=DEVICE)
     model.load_state_dict(state_dict)
-    # TODO: Load optimizer state if we saved it (we currently don't, so simple resume)
-    # If we wanted full resume we'd need to save/load optimizer and Scheduler too.
-    # For now, we load weights and restart scheduler/optimizer which is suboptimal but safer than crashing.
 
 opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
+
+
 
 # Initialize Logger (Only on Rank 0)
 if RANK == 0:
@@ -425,9 +431,28 @@ for epoch in range(1, EPOCHS+1):
     avg_components = {k: v / dataset_len for k, v in running_comp.items()}
     
     # Prepare metrics for logger
-    # Check for improvement (Early Stopping)
     if avg_loss < best_loss:
         best_loss = avg_loss
+
+    # Load Checkpoint Interval
+    CHECKPOINT_INTERVAL = config.get('training', {}).get('checkpoint_interval', 10)
+
+    # Save Rolling Checkpoint (Every N epochs, overwrite)
+    if epoch % CHECKPOINT_INTERVAL == 0:
+        # Atomic overwriting of rolling checkpoint
+        if RANK == 0:
+            temp_ckpt = CHECKPOINT_FILE + ".tmp"
+            torch.save(model.state_dict(), temp_ckpt)
+            if os.path.exists(CHECKPOINT_FILE): os.remove(CHECKPOINT_FILE)
+            os.rename(temp_ckpt, CHECKPOINT_FILE)
+            print(f"  > Saved rolling checkpoint to {CHECKPOINT_FILE}")
+            
+            # Save feature importance
+            save_feature_importance(model, chs, epoch_num=epoch)
+            
+    # Check for improvement (Early Stopping)
+    if avg_loss < best_loss:
+        # best_loss updated above
         patience_counter = 0
         # Save BEST model to main file
         # Atomic save: save to temp and rename to prevent corruption
