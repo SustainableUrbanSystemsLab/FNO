@@ -425,35 +425,6 @@ for epoch in range(1, EPOCHS+1):
     avg_components = {k: v / dataset_len for k, v in running_comp.items()}
     
     # Prepare metrics for logger
-    metrics = {
-        'total_loss': avg_loss,
-        'mse_loss': avg_components['mse_loss'],
-        'gradient_loss': avg_components['gradient_loss'],
-        'spectral_loss': avg_components['spectral_loss'],
-        'peak_loss': avg_components['peak_loss'],
-        'learning_rate': opt.param_groups[0]['lr'],
-        'epoch_time_sec': epoch_time,
-        'best_loss': best_loss, 
-        'patience': patience_counter
-    }
-    
-    if RANK == 0:
-        logger.log_epoch(epoch, metrics)
-        print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e} (Peak: {avg_components['peak_loss']:.6e})")
-    
-    # Save epoch checkpoint history (every 10 epochs)
-    if epoch % 100 == 0:
-        os.makedirs("epochs", exist_ok=True)
-        epoch_path = os.path.join("epochs", MODEL_OUT + f".epoch{epoch}")
-        # Atomic save for epoch checkpoints
-        temp_epoch = epoch_path + ".tmp"
-        torch.save(model.state_dict(), temp_epoch)
-        if os.path.exists(epoch_path): os.remove(epoch_path)
-        os.rename(temp_epoch, epoch_path)
-        
-        # Save feature importance
-        save_feature_importance(model, chs, epoch_num=epoch)
-
     # Check for improvement (Early Stopping)
     if avg_loss < best_loss:
         best_loss = avg_loss
@@ -472,7 +443,29 @@ for epoch in range(1, EPOCHS+1):
         if patience_counter >= PATIENCE:
             print(f"Early stopping triggered at epoch {epoch}")
             save_feature_importance(model, chs, epoch_num=epoch) # Save at early stop too
-            break
+            early_stop = True # Flag to break after logging
+        else:
+            early_stop = False
+
+    # Prepare metrics for logger (updated with new patience)
+    metrics = {
+        'total_loss': avg_loss,
+        'mse_loss': avg_components['mse_loss'],
+        'gradient_loss': avg_components['gradient_loss'],
+        'spectral_loss': avg_components['spectral_loss'],
+        'peak_loss': avg_components['peak_loss'],
+        'learning_rate': opt.param_groups[0]['lr'],
+        'epoch_time_sec': epoch_time,
+        'best_loss': best_loss, 
+        'patience': patience_counter
+    }
+    
+    if RANK == 0:
+        logger.log_epoch(epoch, metrics)
+        print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e} (Peak: {avg_components['peak_loss']:.6e})")
+
+    if 'early_stop' in locals() and early_stop:
+        break
 
 # Finish Logger
 if RANK == 0:
