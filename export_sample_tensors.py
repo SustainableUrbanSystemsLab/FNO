@@ -95,11 +95,42 @@ def export_sample():
         # 4. Save as .npz (NumPy) - Universal
         output_npz = "sample_data.npz"
         np.savez(output_npz, X=X_tensor.numpy(), Y=Y_tensor.numpy(), channel_names=ch_names)
+
+        # 5. Save as .csv (Excel Compatible)
+        output_csv = "sample_data.csv"
+        print("\n   Generating Excel-compatible CSV...")
+        
+        # Flatten for CSV: Rows = Pixels, Cols = Channels
+        # X: [C, H, W] -> [H, W, C]
+        X_np = X_tensor.permute(1, 2, 0).numpy()
+        Y_np = Y_tensor.permute(1, 2, 0).numpy() # [H, W, 1]
+        
+        h, w, c = X_np.shape
+        
+        # Create coordinate grids
+        y_grid, x_grid = np.mgrid[0:h, 0:w]
+        
+        # Flatten everything
+        flat_dict = {
+            'Y_Index': y_grid.flatten(),
+            'X_Index': x_grid.flatten()
+        }
+        
+        # Add Input Channels
+        for i, name in enumerate(ch_names):
+            flat_dict[f"Input_{name}"] = X_np[:, :, i].flatten()
+            
+        # Add Target
+        flat_dict["Target_Delta_U"] = Y_np[:, :, 0].flatten()
+        
+        df_export = pd.DataFrame(flat_dict)
+        df_export.to_csv(output_csv, index=False)
         
         print(f"\nSuccess!")
         print(f"1) Processed Tensor Data saved to:")
         print(f"   - {output_pt} (for PyTorch users)")
         print(f"   - {output_npz} (for NumPy/Matlab users)")
+        print(f"   - {output_csv} (for Excel users)")
         
         print("\n2) Data Structure:")
         print(f"   X (Input):  Shape {tuple(X_tensor.shape)} -> [Channels, Height, Width]")
