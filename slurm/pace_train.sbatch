@@ -68,6 +68,9 @@ if [ "${NUM_GPUS:-1}" -gt 1 ]; then
     # NCCL settings for HPC
     export NCCL_ASYNC_ERROR_HANDLING=1  # Better error handling
     export NCCL_IB_DISABLE=0            # Enable InfiniBand if available
+    export TORCH_NCCL_TRACE_BUFFER_SIZE=2048 # Enable Flight Recorder for debugging
+    # export NCCL_DEBUG=INFO            # Uncomment for verbose logging
+
     
     echo "Starting DISTRIBUTED training with ${NUM_GPUS} GPUs on port ${MASTER_PORT}..."
     uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_fno_distributed.py ${CONFIG_FLAG} ${RESET_FLAG} ${FRESH_FLAG}

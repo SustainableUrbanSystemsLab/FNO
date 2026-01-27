@@ -549,25 +549,36 @@ def main():
                 print(f"  > Checkpoint saved to {CHECKPOINT_PATH}")
 
             # Early stopping
+            # CRITICAL FIX: All ranks must track patience and decide to stop together.
+            # Since avg_loss is synchronized (all_reduce), everyone sees the same value.
+            
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 patience_counter = 0
-                state_dict = model.module.state_dict() if is_distributed else model.state_dict()
-                temp_out = MODEL_OUT + ".tmp"
-                torch.save(state_dict, temp_out)
-                if os.path.exists(MODEL_OUT):
-                    os.remove(MODEL_OUT)
-                os.rename(temp_out, MODEL_OUT)
-                print(f"  > New best loss! Saved {MODEL_OUT}")
+                
+                # Only Rank 0 saves the model
+                if is_main_process(rank):
+                    state_dict = model.module.state_dict() if is_distributed else model.state_dict()
+                    temp_out = MODEL_OUT + ".tmp"
+                    torch.save(state_dict, temp_out)
+                    if os.path.exists(MODEL_OUT):
+                        try: os.remove(MODEL_OUT)
+                        except: pass
+                    os.rename(temp_out, MODEL_OUT)
+                    print(f"  > New best loss! Saved {MODEL_OUT}")
+                    
             else:
                 patience_counter += 1
-                print(f"  > No improvement. Patience {patience_counter}/{PATIENCE}")
+                if is_main_process(rank):
+                    print(f"  > No improvement. Patience {patience_counter}/{PATIENCE}")
+                
                 if patience_counter >= PATIENCE:
-                    print(f"Early stopping at epoch {epoch}")
+                    if is_main_process(rank):
+                        print(f"Early stopping at epoch {epoch}")
                     break
             
-            # Log epoch metrics for publication
-            if logger:
+            # Log epoch metrics for publication (only Rank 0)
+            if is_main_process(rank) and logger:
                 logger.log_epoch(epoch, {
                     'total_loss': avg_loss,
                     'mse_loss': avg_mse,
