@@ -88,15 +88,23 @@ def export_sample():
         
         Y_tensor = torch.from_numpy(target_valid)
 
-        # 3. Save
-        output_path = "sample_data.pt"
-        torch.save({'X': X_tensor, 'Y': Y_tensor, 'channel_names': ch_names}, output_path)
+        # 3. Save as .pt (PyTorch) - Standard for FNO
+        output_pt = "sample_data.pt"
+        torch.save({'X': X_tensor, 'Y': Y_tensor, 'channel_names': ch_names}, output_pt)
         
-        print(f"\nSaved tensors to {output_path}")
-        print("Structure:")
-        print(f"  X (Input):  Shape {tuple(X_tensor.shape)}  (Channels: {ch_names})")
-        print(f"  Y (Target): Shape {tuple(Y_tensor.shape)}  (Delta U)")
-        print(f"\nYou can load this in python with: data = torch.load('{output_path}')")
+        # 4. Save as .npz (NumPy) - Universal
+        output_npz = "sample_data.npz"
+        np.savez(output_npz, X=X_tensor.numpy(), Y=Y_tensor.numpy(), channel_names=ch_names)
+        
+        print(f"\nSuccess!")
+        print(f"1) Processed Tensor Data saved to:")
+        print(f"   - {output_pt} (for PyTorch users)")
+        print(f"   - {output_npz} (for NumPy/Matlab users)")
+        
+        print("\n2) Data Structure:")
+        print(f"   X (Input):  Shape {tuple(X_tensor.shape)} -> [Channels, Height, Width]")
+        print(f"   Y (Target): Shape {tuple(Y_tensor.shape)} -> [1, Height, Width]")
+        print(f"   Channels:   {ch_names}")
 
     except Exception as e:
         print(f"Error: {e}")
