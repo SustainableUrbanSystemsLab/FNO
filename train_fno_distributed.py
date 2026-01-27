@@ -41,7 +41,21 @@ config = load_config()
 if sys.platform == 'win32':
     DATA_FOLDER = config.get('paths', {}).get('data_folder_windows', 'train_csv')
 else:
-    DATA_FOLDER = config.get('paths', {}).get('data_folder_linux', 'train_csv')
+    # Smart detection for cluster environment
+    linux_path = config.get('paths', {}).get('data_folder_linux', 'train_csv')
+    ice_path = config.get('paths', {}).get('data_folder_ice', '')
+    
+    # Prefer ICE path if on Linux and it exists
+    if ice_path and os.path.exists(ice_path):
+        DATA_FOLDER = ice_path
+        print(f"Detected ICE Cluster path: {DATA_FOLDER}")
+    elif os.path.exists(linux_path):
+        DATA_FOLDER = linux_path
+        print(f"Detected Linux/PACE path: {DATA_FOLDER}")
+    else:
+        # Fallback
+        DATA_FOLDER = linux_path
+        print(f"Warning: Neither ICE nor Linux paths found. Defaulting to: {DATA_FOLDER}")
 
 MODEL_OUT = config.get('paths', {}).get('model_output', 'fno_mag_weights.pth')
 CHECKPOINT_PATH = config.get('paths', {}).get('checkpoint_file', 'checkpoint_latest.pth')
@@ -179,23 +193,49 @@ def get_cache_hash(files):
 
 def load_or_prepare_dataset(files, rank, is_main):
     """Load from cache or prepare dataset with multiprocessing."""
-    # Try to find ANY existing cache first
-    existing_caches = glob.glob(f"{CACHE_FILE}*")
+    # 1. Compute hash of the current file list to ensure cache validity
+    current_hash = get_cache_hash(files)
+    expected_cache_name = f"{CACHE_FILE.replace('.pkl', '')}_{current_hash}.pkl"
     
-    if existing_caches:
-        cache_path = existing_caches[0]
+    if is_main:
+        print(f"Dataset Hash: {current_hash}")
+        print(f"Looking for cache: {expected_cache_name}")
+
+    # 2. Try to load EXACT matching cache
+    if os.path.exists(expected_cache_name):
         if is_main:
-            print(f"Loading cached dataset from {cache_path}...")
+            print(f"Loading cached dataset from {expected_cache_name}...")
         try:
-            with open(cache_path, 'rb') as f:
+            with open(expected_cache_name, 'rb') as f:
                 return pickle.load(f)
         except Exception as e:
             if is_main:
-                print(f"Failed to load cache {cache_path}: {e}")
+                print(f"Failed to load cache {expected_cache_name}: {e}")
+                print("Will rebuild cache.")
     
-    # If no cache found, define new cache path (simple name to be robust)
-    cache_path = CACHE_FILE
-    
+    # 2b. Check for LEGACY cache (dataset_cache_neuralop.pkl) and migrate if exists
+    elif os.path.exists(CACHE_FILE):
+        if is_main:
+            print(f"Found legacy cache {CACHE_FILE}. Migrating to {expected_cache_name}...")
+            try:
+                # Rename/Move to new hashed name
+                os.rename(CACHE_FILE, expected_cache_name)
+                # Load the newly renamed file
+                with open(expected_cache_name, 'rb') as f:
+                    return pickle.load(f)
+            except Exception as e:
+                print(f"Migration/Loading failed: {e}. Will rebuild.")
+
+    # 3. If no exact match (and migration failed/not possible), we must rebuild.
+    # (Optional: Cleanup old caches to save space)
+    if is_main:
+        old_caches = glob.glob(f"{CACHE_FILE.replace('.pkl', '')}_*.pkl")
+        for oc in old_caches:
+            if oc != expected_cache_name:
+                print(f"Removing stale cache: {oc}")
+                try: os.remove(oc)
+                except: pass
+
     # Prepare dataset with multiprocessing
     if is_main:
         print(f"Preparing dataset from {len(files)} files using {NUM_WORKERS} workers...")
@@ -222,8 +262,8 @@ def load_or_prepare_dataset(files, rank, is_main):
     
     # Save to cache (only on main process)
     if is_main:
-        print(f"Saving cache to {cache_path}...")
-        with open(cache_path, 'wb') as f:
+        print(f"Saving cache to {expected_cache_name}...")
+        with open(expected_cache_name, 'wb') as f:
             pickle.dump((Xs, Ys, Masks, chs), f)
     
     return Xs, Ys, Masks, chs

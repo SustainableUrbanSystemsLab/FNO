@@ -2,8 +2,9 @@
 # Optimized to capture sharp gradients and preserve flow extremes
 
 [paths]
-data_folder_windows = "train_csv"
-data_folder_linux = "train_csv"
+data_folder_windows = "C:/LabShare/Dataset/FormFluxCases/Compressed/Training_Dataset"
+data_folder_linux = "/storage/coda1/p-pkastner3/0/ikaradag3/FNO/Training_Dataset"
+data_folder_ice = "/home/hice1/ikaradag3/scratch/FNO/Training_Dataset"
 model_output = "fno_wake_weights.pth"
 checkpoint_file = "checkpoint_wake.pth"
 
@@ -31,6 +32,14 @@ wake_weight = 0.3               # NEW - focus on wake regions
 
 [performance]
 num_workers = 0                 # Auto-detect based on CPU count
+
+[pace]
+account = "gts-pkastner3"
+partition = ""
+
+[ice]
+account = "coa"
+partition = ""
 
 # Explanation of Changes:
 # ========================
