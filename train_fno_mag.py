@@ -91,22 +91,9 @@ def infer_grid(xs, ys, tol=1e-6):
     idx=[(key_y[kyv], key_x[kxv]) for kxv,kyv in zip(kx,ky)]
     return len(ux), len(uy), idx
 
-# Cleanup old files that might be corrupted or locked
-if os.path.exists(MODEL_OUT):
-    try: os.remove(MODEL_OUT)
-    except: pass
-if os.path.exists(MODEL_OUT + ".tmp"):
-    try: os.remove(MODEL_OUT + ".tmp")
-    except: pass
-
-# EMERGENCY CLEANUP: Free up space by deleting old epoch history
-import shutil
-if os.path.exists("epochs"):
-    try: shutil.rmtree("epochs", ignore_errors=True)
-    except: pass
-if os.path.exists("../epochs"): # Check parent too if being run from subfolder
-    try: shutil.rmtree("../epochs", ignore_errors=True)
-    except: pass
+# Cleanup logic removed to prevent data loss on resume.
+# Previous logic at lines 94-110 was deleting checkpoints at startup.
+# We now preserve 'MODEL_OUT' and 'epochs/' to allow resumption.
 
 # ============ Data Loading ============
 import hashlib
@@ -322,7 +309,21 @@ if IS_DISTRIBUTED:
     model = DDP(model, device_ids=[LOCAL_RANK])
 elif torch.cuda.device_count() > 1:
     print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+    model = DDP(model, device_ids=[LOCAL_RANK])
+elif torch.cuda.device_count() > 1:
+    print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
     model = nn.DataParallel(model)
+
+# Resume from checkpoint if available
+start_epoch = 1
+if os.path.exists(MODEL_OUT):
+    print(f"Resuming from checkpoint: {MODEL_OUT}")
+    # Map location is critical on DDP to avoid device mismatch
+    state_dict = torch.load(MODEL_OUT, map_location=DEVICE)
+    model.load_state_dict(state_dict)
+    # TODO: Load optimizer state if we saved it (we currently don't, so simple resume)
+    # If we wanted full resume we'd need to save/load optimizer and Scheduler too.
+    # For now, we load weights and restart scheduler/optimizer which is suboptimal but safer than crashing.
 
 opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
@@ -459,11 +460,12 @@ for epoch in range(1, EPOCHS+1):
         patience_counter = 0
         # Save BEST model to main file
         # Atomic save: save to temp and rename to prevent corruption
-        temp_out = MODEL_OUT + ".tmp"
-        torch.save(model.state_dict(), temp_out)
-        if os.path.exists(MODEL_OUT): os.remove(MODEL_OUT)
-        os.rename(temp_out, MODEL_OUT)
-        print(f"  > New best loss! Saved {MODEL_OUT}")
+        if RANK == 0:
+            temp_out = MODEL_OUT + ".tmp"
+            torch.save(model.state_dict(), temp_out)
+            if os.path.exists(MODEL_OUT): os.remove(MODEL_OUT)
+            os.rename(temp_out, MODEL_OUT)
+            print(f"  > New best loss! Saved {MODEL_OUT}")
     else:
         patience_counter += 1
         print(f"  > No improvement. Patience {patience_counter}/{PATIENCE}")
