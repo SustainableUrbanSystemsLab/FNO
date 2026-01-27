@@ -314,23 +314,38 @@ elif torch.cuda.device_count() > 1:
     print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
     model = nn.DataParallel(model)
 
-# Resume from checkpoint if available
+opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
+
 # Resume from checkpoint if available
 CHECKPOINT_FILE = "checkpoint.pth"
 start_epoch = 1
 
 if os.path.exists(CHECKPOINT_FILE):
     print(f"Resuming from internal checkpoint: {CHECKPOINT_FILE}")
-    state_dict = torch.load(CHECKPOINT_FILE, map_location=DEVICE)
-    model.load_state_dict(state_dict)
+    checkpoint = torch.load(CHECKPOINT_FILE, map_location=DEVICE)
+    
+    # Handle Full Checkpoint (dict) vs Weights Only (older files)
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+        # Load optimizer/scheduler if available
+        if 'optimizer_state_dict' in checkpoint:
+            opt.load_state_dict(checkpoint['optimizer_state_dict'])
+        if 'scheduler_state_dict' in checkpoint:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            
+        start_epoch = checkpoint['epoch'] + 1
+        best_loss = checkpoint.get('best_loss', float('inf'))
+        print(f"Resuming from Epoch {checkpoint['epoch']} (Best Loss: {best_loss:.4f})")
+    else:
+        model.load_state_dict(checkpoint)
+        print("Resuming from weights-only checkpoint.")
+
 elif os.path.exists(MODEL_OUT):
     print(f"Resuming from best model: {MODEL_OUT}")
     # Map location is critical on DDP to avoid device mismatch
     state_dict = torch.load(MODEL_OUT, map_location=DEVICE)
     model.load_state_dict(state_dict)
-
-opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
 
 
 
@@ -379,7 +394,7 @@ def save_feature_importance(model, feature_names, epoch_num=None):
     except Exception as e:
         print(f"Failed to calculate feature importance: {e}")
 
-for epoch in range(1, EPOCHS+1):
+for epoch in range(start_epoch, EPOCHS+1):
     model.train(); running=0.0
     
     if IS_DISTRIBUTED:
@@ -431,21 +446,28 @@ for epoch in range(1, EPOCHS+1):
     avg_components = {k: v / dataset_len for k, v in running_comp.items()}
     
     # Prepare metrics for logger
-    if avg_loss < best_loss:
-        best_loss = avg_loss
+
 
     # Load Checkpoint Interval
     CHECKPOINT_INTERVAL = config.get('training', {}).get('checkpoint_interval', 10)
 
     # Save Rolling Checkpoint (Every N epochs, overwrite)
+    # Save Rolling Checkpoint (Every N epochs, overwrite)
     if epoch % CHECKPOINT_INTERVAL == 0:
         # Atomic overwriting of rolling checkpoint
         if RANK == 0:
+            checkpoint_state = {
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': opt.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'best_loss': best_loss,
+            }
             temp_ckpt = CHECKPOINT_FILE + ".tmp"
-            torch.save(model.state_dict(), temp_ckpt)
+            torch.save(checkpoint_state, temp_ckpt)
             if os.path.exists(CHECKPOINT_FILE): os.remove(CHECKPOINT_FILE)
             os.rename(temp_ckpt, CHECKPOINT_FILE)
-            print(f"  > Saved rolling checkpoint to {CHECKPOINT_FILE}")
+            print(f"  > Saved rolling full-state checkpoint to {CHECKPOINT_FILE}")
             
             # Save feature importance
             save_feature_importance(model, chs, epoch_num=epoch)
