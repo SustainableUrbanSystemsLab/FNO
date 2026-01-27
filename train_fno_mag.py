@@ -430,7 +430,7 @@ for epoch in range(1, EPOCHS+1):
         'spectral_loss': avg_components['spectral_loss'],
         'peak_loss': avg_components['peak_loss'],
         'learning_rate': opt.param_groups[0]['lr'],
-        'epoch_time': epoch_time,
+        'epoch_time_sec': epoch_time,
         'best_loss': best_loss, 
         'patience': patience_counter
     }
