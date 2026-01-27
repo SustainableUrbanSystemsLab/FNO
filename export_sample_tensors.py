@@ -40,7 +40,7 @@ def export_sample():
         if infer is None:
             print("Grid inference failed.")
             return
-        nx, ny, idx_map, _, _ = infer
+        nx, ny, _, _, idx_map = infer
         
         # Build INPUT (X)
         gh_data = {c: df[c].tolist() for c in cols}
