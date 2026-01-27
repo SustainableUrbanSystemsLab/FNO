@@ -83,7 +83,7 @@ class TrainingLogger:
         self.csv_file = open(self.metrics_csv, 'w', newline='')
         self.csv_writer = csv.writer(self.csv_file)
         self.fieldnames = [
-            'epoch', 'total_loss', 'mse_loss', 'gradient_loss', 'spectral_loss', 'peak_loss',
+            'epoch', 'total_loss', 'mse_loss', 'gradient_loss', 'spectral_loss', 'peak_loss', 'wake_loss',
             'learning_rate', 'epoch_time_sec', 'best_loss', 'patience_counter'
         ]
         self.csv_writer.writerow(self.fieldnames)
