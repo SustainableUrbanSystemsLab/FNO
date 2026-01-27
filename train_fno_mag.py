@@ -505,7 +505,7 @@ for epoch in range(start_epoch, EPOCHS+1):
         'learning_rate': opt.param_groups[0]['lr'],
         'epoch_time_sec': epoch_time,
         'best_loss': best_loss, 
-        'patience': patience_counter
+        'patience_counter': patience_counter
     }
     
     if RANK == 0:
