@@ -9,7 +9,7 @@ from gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
 from fno2d_model import FNO2d
 
 # ================= CONFIG =================
-CONFIG_FILE = "config.toml"
+CONFIG_FILE = "config_wake_focused.toml"
 
 def load_config():
     import tomllib  # Python 3.11+
