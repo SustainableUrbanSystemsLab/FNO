@@ -11,7 +11,7 @@ checkpoint_file = "checkpoint_wake.pth"
 [training]
 batch_size = 4
 epochs = 200
-learning_rate = 3e-3           # Higher LR to escape smooth local minimum
+learning_rate = 1e-3           # Reduced from 3e-3 to prevent divergence
 patience = 50
 checkpoint_interval = 10
 min_lr = 1e-5                  # Prevent LR decay to zero
