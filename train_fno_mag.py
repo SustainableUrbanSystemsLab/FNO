@@ -411,7 +411,8 @@ for epoch in range(1, EPOCHS+1):
             if k in running_comp:
                 running_comp[k] += v * batch_size
                 
-        pbar.set_postfix({"loss": f"{loss.item():.4e}"})
+        if RANK == 0:
+            pbar.set_postfix({"loss": f"{loss.item():.4e}"})
         
     scheduler.step()
     epoch_time = time.time() - start_time
