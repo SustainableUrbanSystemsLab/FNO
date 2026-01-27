@@ -486,6 +486,7 @@ for epoch in range(start_epoch, EPOCHS+1):
             print(f"  > New best loss! Saved {MODEL_OUT}")
     else:
         patience_counter += 1
+        print(f"DEBUG: Loss {avg_loss:.6f} >= Best {best_loss:.6f}. Inc Patience to {patience_counter}")
         print(f"  > No improvement. Patience {patience_counter}/{PATIENCE}")
         if patience_counter >= PATIENCE:
             print(f"Early stopping triggered at epoch {epoch}")
