@@ -104,32 +104,34 @@ for CSV in tqdm(files, desc="Inference"):
             pred = model(X)
 
         # ================= POST-PROCESS =================
-        # Model predicts MAGNITUDE directly
-        pred_grid = pred[0, 0].cpu().numpy()
+        # Model predicts DELTA (Normalized Difference)
+        # Delta = (Mag - Uref) / Uref
+        # -> Mag = (Delta + 1) * Uref
+        
+        delta_grid = pred[0, 0].cpu().numpy()
 
         # Map grid back to flat CSV ordering
         _, _, _, _, idx_map = infer_grid_from_coords_simple(
             df["X_coords"], df["Y_coords"]
         )
 
-        mag_flat = np.array([pred_grid[iy, ix] for (iy, ix) in idx_map])
+        delta_flat = np.array([delta_grid[iy, ix] for (iy, ix) in idx_map])
+        
+        # Get Reference Velocity (Inlet Profile)
+        # U_over_Uref is effectively U_inlet / U_ref(scalar)
+        # Since we work in dimensionless units, U_over_Uref IS the reference for this pixel.
+        baseline = df["U_over_Uref"].to_numpy()
+        
+        # Reconstruction: Mag = Baseline * (Delta + 1)
+        mag_reconstructed = baseline * (delta_flat + 1.0)
         
         # Clip to ensure physics (non-negative)
-        mag_raw = np.clip(mag_flat, 0.0, None)
-
-        # Derived delta for reference (optional)
-        baseline = df["U_over_Uref"].to_numpy()
-        # Avoid div check
-        delta_flat = (mag_raw / (baseline + 1e-6)) - 1.0
+        mag_final = np.clip(mag_reconstructed, 0.0, None)
 
         # -------- SANITY PRINTS (keep for now) --------
         print(f"\n{os.path.basename(CSV)}")
-        print(f"  mag RAW:   min={mag_raw.min():.3f}, "
-              f"mean={mag_raw.mean():.3f}, "
-              f"max={mag_raw.max():.3f}")
-        print(f"  mag RAW:   min={mag_raw.min():.3f}, "
-              f"mean={mag_raw.mean():.3f}, "
-              f"max={mag_raw.max():.3f}")
+        print(f"  Delta Pred: min={delta_flat.min():.3f}, max={delta_flat.max():.3f}")
+        print(f"  Mag Final:  min={mag_final.min():.3f}, mean={mag_final.mean():.3f}, max={mag_final.max():.3f}")
 
         # ================= SAVE OUTPUT =================
         # Rename ground truth 'mag_U' -> 'actual_U' to avoid conflict
@@ -137,7 +139,7 @@ for CSV in tqdm(files, desc="Inference"):
             df.rename(columns={"mag_U": "actual_U"}, inplace=True)
 
         df["delta_pred"] = np.round(delta_flat, 6)
-        df["mag_U"] = np.round(mag_raw, 6) # Prediction (Normalized)
+        df["mag_U"] = np.round(mag_final, 6) # Prediction (Normalized)
 
         # Performance Metrics (if ground truth exists)
         if "actual_U" in df.columns:
@@ -153,7 +155,7 @@ for CSV in tqdm(files, desc="Inference"):
 
         if "U_ref" in df.columns:
             Uref = float(df["U_ref"].iloc[0])
-            df["mag_U_dimensional"] = mag_raw * Uref # Dimensional prediction
+            df["mag_U_dimensional"] = mag_final * Uref # Dimensional prediction
 
         df.rename(columns={"X_coords": "x", "Y_coords": "y"}, inplace=True)
         df.to_csv(out_csv, index=False)
