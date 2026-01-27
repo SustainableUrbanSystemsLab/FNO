@@ -85,7 +85,18 @@ for CSV in tqdm(files, desc="Inference"):
                 n_layers=N_LAYERS
             ).to(DEVICE)
 
-            model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+            
+            state_dict = torch.load(MODEL_PATH, map_location=DEVICE)
+            
+            # Fix DDP 'module.' prefix if present
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                if k.startswith("module."):
+                    new_state_dict[k[7:]] = v  # remove "module."
+                else:
+                    new_state_dict[k] = v
+            
+            model.load_state_dict(new_state_dict)
             model.eval()
 
         # --- Forward pass ---
