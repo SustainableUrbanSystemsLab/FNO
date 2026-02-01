@@ -200,12 +200,21 @@ def main():
             print(f"Loaded {X_all.shape[0]} samples. Shapes: X={X_all.shape}, Y={Y_all.shape}")
         
         # Generate mask from SDF (Assumed to be channel 0)
-        # Weight = 1.0 + 19.0 * exp(-SDF / 5.0)
+        # We need unnormalized SDF (meters) for the exponential weighting.
+        # gh_to_fno.py normalizes SDF by dividing by 200.0.
         sdf_all = X_all[:, 0:1, :, :]
-        M_all = 1.0 + 19.0 * torch.exp(-torch.clamp(sdf_all, min=0.0) / 5.0)
+        sdf_max = sdf_all.max()
+        
+        # If SDF is normalized [0, 1], scale it back to meters [0, 200] for weighting
+        if sdf_max <= 5.0: # Heuristic: if max is small, it's normalized
+            sdf_meters = sdf_all * 200.0
+        else:
+            sdf_meters = sdf_all
+            
+        M_all = 1.0 + 19.0 * torch.exp(-torch.clamp(sdf_meters, min=0.0) / 5.0)
         
         if is_main_process(rank):
-            print(f"Loaded {X_all.shape[0]} samples. Shapes: X={X_all.shape}, Y={Y_all.shape}")
+            print(f"Mask Weights Calibrated (SDF max: {sdf_max:.2f}, Scaling applied: {sdf_max <= 5.0})")
     else:
         # Fallback to CSV loading
         files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.csv"), recursive=True))
@@ -230,6 +239,14 @@ def main():
 
     # Model
     model = HybridFNO(in_channels=X_all.shape[1], hidden_channels=64).to(device)
+    
+    # Optional: Load existing weights to resume training
+    if os.path.exists(MODEL_OUT) and not args.fresh:
+        if is_main_process(rank):
+            print(f"Resuming from existing weights: {MODEL_OUT}")
+        state_dict = torch.load(MODEL_OUT, map_location=device, weights_only=True)
+        model.load_state_dict(state_dict)
+
     if is_distributed: model = DDP(model, device_ids=[local_rank])
     
     opt = torch.optim.AdamW(model.parameters(), lr=LR)
@@ -240,7 +257,12 @@ def main():
         print(f"Hybrid FNO Training Started on {world_size} GPUs")
         logger = TrainingLogger(output_dir="training_logs")
     
+    # Initialize best_loss from current model if resuming
     best_loss = float('inf')
+    if os.path.exists(MODEL_OUT) and not args.fresh:
+        # We don't have the previous loss easily, so we just set it to inf 
+        # to ensure the first epoch of resumed training saves if it improves.
+        pass
     for epoch in range(1, EPOCHS + 1):
         if is_distributed: sampler.set_epoch(epoch)
         model.train()
