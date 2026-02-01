@@ -137,13 +137,16 @@ def main():
         linux_path = config.get('paths', {}).get('data_folder_linux', '')
         ice_path = config.get('paths', {}).get('data_folder_ice', '')
         
+        if ice_path: ice_path = os.path.expanduser(ice_path)
+        if linux_path: linux_path = os.path.expanduser(linux_path)
+        
         # Priority: ICE > Linux > local 'train_csv'
         if ice_path and os.path.exists(ice_path) and glob.glob(os.path.join(ice_path, "*.csv")):
             DATA_FOLDER = ice_path
         elif linux_path and os.path.exists(linux_path) and glob.glob(os.path.join(linux_path, "*.csv")):
             DATA_FOLDER = linux_path
         else:
-            DATA_FOLDER = 'train_csv' # Final fallback to local folder
+            DATA_FOLDER = os.path.abspath('train_csv') # Final fallback to local folder
             
     if is_main_process(rank):
         print(f"Using Data Folder: {DATA_FOLDER}")

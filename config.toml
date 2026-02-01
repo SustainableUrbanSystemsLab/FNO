@@ -5,7 +5,7 @@
 # Training data paths - script auto-detects platform
 data_folder_windows = "C:/LabShare/Dataset/FormFluxCases/Compressed/Training_Dataset"
 data_folder_linux = "./train_csv"
-data_folder_ice = "./train_csv"
+data_folder_ice = "~/scratch/Training_Dataset"
 
 # Path to test CSV files for inference
 test_folder = 'test_csv'
