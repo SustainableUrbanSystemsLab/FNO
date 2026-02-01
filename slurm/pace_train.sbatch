@@ -60,6 +60,10 @@ if [ -n "${FRESH_TRAIN}" ]; then
     FRESH_FLAG="--fresh"
 fi
 
+# Determine training script
+SCRIPT_NAME="${TRAIN_SCRIPT:-train_fno_distributed.py}"
+echo "Using training script: ${SCRIPT_NAME}"
+
 # Execute training based on GPU count
 if [ "${NUM_GPUS:-1}" -gt 1 ]; then
     # Use random port to avoid conflicts on shared nodes
@@ -73,10 +77,10 @@ if [ "${NUM_GPUS:-1}" -gt 1 ]; then
 
     
     echo "Starting DISTRIBUTED training with ${NUM_GPUS} GPUs on port ${MASTER_PORT}..."
-    uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} train_fno_distributed.py ${CONFIG_FLAG} ${RESET_FLAG} ${FRESH_FLAG}
+    uv run torchrun --nproc_per_node=${NUM_GPUS} --master_port=${MASTER_PORT} ${SCRIPT_NAME} ${CONFIG_FLAG} ${RESET_FLAG} ${FRESH_FLAG}
 else
     echo "Starting SINGLE-GPU training..."
-    uv run python train_fno_distributed.py ${CONFIG_FLAG} ${RESET_FLAG} ${FRESH_FLAG}
+    uv run python ${SCRIPT_NAME} ${CONFIG_FLAG} ${RESET_FLAG} ${FRESH_FLAG}
 fi
 
 echo "Job finished on $(date)"

@@ -45,5 +45,5 @@ partition = ""
 
 [ice]
 # ICE cluster configuration
-account = "coa"
+account = "coc"
 partition = "" # Optional, add if needed

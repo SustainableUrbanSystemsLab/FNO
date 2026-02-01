@@ -3,13 +3,14 @@
 # ICE Deployment Wrapper
 # Usage: bash slurm/deploy_ice.sh --gpu [H100|A100] [--ngpus 1|2] [--config config.toml]
 
-GPU_TYPE="h200" # ICE often has H100s or A100s, defaulting to generic if unsure, but user can specify.
-# Actually on ICE, it's often just partitions. Let's assume user provides gpu type or we default to a100.
-# User didn't specify GPU for ICE, so I'll keep it flexible.
+GPU_TYPE="h200" # ICE often has H100s or A100s
+
+# Defaults
 NUM_GPUS=2
 CONFIG_FILE="config.toml"
 RESET_PATIENCE=""
 FRESH_TRAIN=""
+TRAIN_SCRIPT="train_fno_distributed.py"
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
@@ -17,6 +18,7 @@ while [[ "$#" -gt 0 ]]; do
         --gpu) GPU_TYPE="$2"; shift ;;
         --ngpus) NUM_GPUS="$2"; shift ;;
         --config) CONFIG_FILE="$2"; shift ;;
+        --script) TRAIN_SCRIPT="$2"; shift ;;
         --reset-patience) RESET_PATIENCE="1" ;;
         --fresh) FRESH_TRAIN="1" ;;
         *) echo "Unknown parameter passed: $1"; exit 1 ;;
@@ -44,13 +46,13 @@ if [ -f "$CONFIG_FILE" ]; then
     ICE_PARTITION=$(sed -n '/^\[ice\]/,/^\[/p' "$CONFIG_FILE" | grep -E "^partition\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
 else
     echo "Warning: $CONFIG_FILE not found."
-    ICE_ACCOUNT="coa" # Default fallback
+    ICE_ACCOUNT="coc" # Default fallback
     ICE_PARTITION=""
 fi
 
 # Fallback if parsing failed
 if [ -z "$ICE_ACCOUNT" ]; then
-    ICE_ACCOUNT="coa"
+    ICE_ACCOUNT="coc"
 fi
 
 echo "=========================================="
@@ -64,7 +66,7 @@ mkdir -p logs
 
 # Build sbatch command
 # Note: ICE might need specific partition if gpu is not default
-SBATCH_CMD="sbatch --gres=gpu:$SLURM_GPU --account=$ICE_ACCOUNT --export=NUM_GPUS=$NUM_GPUS,CONFIG_FILE=$CONFIG_FILE,RESET_PATIENCE=$RESET_PATIENCE,FRESH_TRAIN=$FRESH_TRAIN"
+SBATCH_CMD="sbatch --gres=gpu:$SLURM_GPU --account=$ICE_ACCOUNT --export=NUM_GPUS=$NUM_GPUS,CONFIG_FILE=$CONFIG_FILE,RESET_PATIENCE=$RESET_PATIENCE,FRESH_TRAIN=$FRESH_TRAIN,TRAIN_SCRIPT=$TRAIN_SCRIPT"
 
 if [ -n "$ICE_PARTITION" ]; then
     SBATCH_CMD="$SBATCH_CMD --partition=$ICE_PARTITION"
