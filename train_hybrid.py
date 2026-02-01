@@ -163,9 +163,14 @@ def main():
             DATA_FOLDER = linux_path
         else:
             # Last ditch attempt: check common absolute locations if everything else failed
-            abs_guess = "/storage/ice1/2/4/athach7/Training_Dataset"
-            if check_path(abs_guess, "Hardcoded Guess"):
-                DATA_FOLDER = abs_guess
+            guesses = [
+                "/storage/ice1/2/4/scratch/Training_Dataset",
+                "/storage/ice1/2/4/athach7/Training_Dataset"
+            ]
+            for guess in guesses:
+                if check_path(guess, "Hardcoded Guess"):
+                    DATA_FOLDER = guess
+                    break
             else:
                 DATA_FOLDER = os.path.join(os.path.dirname(__file__), 'train_csv')
                 if is_main_process(rank):
@@ -184,11 +189,15 @@ def main():
     x_npy = os.path.join(DATA_FOLDER, "X.npy")
     y_npy = os.path.join(DATA_FOLDER, "Y.npy")
     
-    if os.path.exists(x_npy) and os.path.exists(y_npy):
         if is_main_process(rank):
-            print(f"Found Numpy arrays at {DATA_FOLDER}, loading directly...")
-        X_all = torch.from_numpy(np.load(x_npy)).float()
-        Y_all = torch.from_numpy(np.load(y_npy)).float()
+            print(f"Found Numpy arrays at {DATA_FOLDER}, loading with mmap...")
+        
+        # Use copy-on-write memory mapping to save RAM across DDP processes
+        X_all = torch.from_numpy(np.load(x_npy, mmap_mode='c')).float()
+        Y_all = torch.from_numpy(np.load(y_npy, mmap_mode='c')).float()
+        
+        if is_main_process(rank):
+            print(f"Loaded {X_all.shape[0]} samples. Shapes: X={X_all.shape}, Y={Y_all.shape}")
         
         # Generate mask from SDF (Assumed to be channel 0)
         # Weight = 1.0 + 19.0 * exp(-SDF / 5.0)
