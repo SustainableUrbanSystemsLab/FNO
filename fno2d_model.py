@@ -9,225 +9,92 @@ class SpectralConv2d(nn.Module):
         self.out_channels = out_channels
         self.modes1 = modes1
         self.modes2 = modes2
-        self.scale = 1 / (in_channels * out_channels)
-        self.weights1 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, modes1, modes2, dtype=torch.complex64))
-        self.weights2 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, modes1, modes2, dtype=torch.complex64))
+        self.weight_real = nn.Parameter( (1.0/(in_channels*out_channels)) * torch.randn(in_channels, out_channels, modes1, modes2) )
+        self.weight_imag = nn.Parameter( (1.0/(in_channels*out_channels)) * torch.randn(in_channels, out_channels, modes1, modes2) )
 
-    def compl_mul2d(self, input, weights):
-        # (batch, in_channel, x, y), (in_channel, out_channel, x, y) -> (batch, out_channel, x, y)
-        return torch.einsum("bixy,ioxy->boxy", input, weights)
+    def compl_mul2d(self, input_ft, weight_r, weight_i):
+        x = input_ft[:, :, :self.modes1, :self.modes2]
+        xr = x.real.unsqueeze(2)
+        xi = x.imag.unsqueeze(2)
+        wr = weight_r.unsqueeze(0)
+        wi = weight_i.unsqueeze(0)
+        out_r = (xr * wr - xi * wi).sum(dim=1)
+        out_i = (xr * wi + xi * wr).sum(dim=1)
+        return torch.complex(out_r, out_i)
 
     def forward(self, x):
-        batchsize = x.shape[0]
-        # Compute Fourier transform
-        x_ft = torch.fft.rfft2(x)
-
-        # Multiply relevant Fourier modes
-        out_ft = torch.zeros(batchsize, self.out_channels, x.size(-2), x.size(-1)//2 + 1, dtype=torch.complex64, device=x.device)
-        out_ft[:, :, :self.modes1, :self.modes2] = \
-            self.compl_mul2d(x_ft[:, :, :self.modes1, :self.modes2], self.weights1)
-        out_ft[:, :, -self.modes1:, :self.modes2] = \
-            self.compl_mul2d(x_ft[:, :, -self.modes1:, :self.modes2], self.weights2)
-
-        # Return to spatial domain
-        x = torch.fft.irfft2(out_ft, s=(x.size(-2), x.size(-1)))
-        return x
+        B, C, H, W = x.shape
+        x_ft = torch.fft.fft2(x, dim=(-2, -1))
+        out_ft = torch.zeros((B, self.out_channels, H, W), dtype=torch.complex64, device=x.device)
+        out_ft[:, :, :self.modes1, :self.modes2] = self.compl_mul2d(x_ft, self.weight_real, self.weight_imag)
+        x_out = torch.fft.ifft2(out_ft, dim=(-2, -1)).real
+        return x_out
 
 class FNO2d(nn.Module):
     def __init__(self, in_channels, out_channels, modes1=16, modes2=16, width=64, n_layers=4):
         super().__init__()
         self.width = width
         self.in_proj = nn.Conv2d(in_channels, width, kernel_size=1)
-        
-        self.spectral_layers = nn.ModuleList([SpectralConv2d(width, width, modes1, modes2) for _ in range(n_layers)])
-        self.spatial_layers = nn.ModuleList([nn.Conv2d(width, width, kernel_size=3, padding=1) for _ in range(n_layers)])
-        
+        self.fourier_layers = nn.ModuleList([
+            nn.Sequential(
+                SpectralConv2d(width, width, modes1, modes2),
+                nn.Conv2d(width, width, kernel_size=1)
+            ) for _ in range(n_layers)
+        ])
         self.activation = nn.GELU()
         self.out_proj = nn.Sequential(
-            nn.Conv2d(width, 128, kernel_size=1),
+            nn.Conv2d(width, width//2, kernel_size=1),
             nn.GELU(),
-            nn.Conv2d(128, out_channels, kernel_size=1)
+            nn.Conv2d(width//2, out_channels, kernel_size=1)
         )
         self._init_weights()
 
     def _init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
     def forward(self, x):
         x = self.in_proj(x)
-        for spec, spat in zip(self.spectral_layers, self.spatial_layers):
-            x1 = spec(x)
-            x2 = spat(x)
-            x = x + x1 + x2
+        for block in self.fourier_layers:
+            spec = block[0](x)
+            point = block[1](x)
+            x = x + spec + point
             x = self.activation(x)
         out = self.out_proj(x)
         return out
 
-def compute_wake_loss(y_pred, y_target, sensor_mask, wake_threshold=0.3):
+def physics_loss(pred, target, mask=None, grad_weight=0.1):
+    """Combined MSE and Gradient Loss for sharpness.
+    pred, target: (B,C,H,W)
+    mask: (B,1,H,W)
+    grad_weight: importance of sharpness vs magnitude
     """
-    Compute additional loss for wake regions (low wind speed areas).
+    # 1. Main Weighted MSE
+    m = mask if mask is not None else torch.ones_like(pred)
+    mse = ((pred - target)**2 * m).sum() / (m.sum() + 1e-8)
     
-    Wake regions are where flow separation occurs behind buildings,
-    creating the dark blue low-speed zones in your visualization.
+    # 2. Gradient Sharpness (Sobel-like)
+    # Penalize the 'blurry' edges
+    def get_grads(x):
+        # x is (B,C,H,W)
+        dx = x[:, :, :, 1:] - x[:, :, :, :-1]
+        dy = x[:, :, 1:, :] - x[:, :, :-1, :]
+        return dx, dy
     
-    Args:
-        y_pred: Model predictions [B, C, H, W]
-        y_target: Ground truth [B, C, H, W]
-        sensor_mask: Weighting mask [B, C, H, W]
-        wake_threshold: Wind speed threshold to identify wakes
+    p_dx, p_dy = get_grads(pred)
+    t_dx, t_dy = get_grads(target)
     
-    Returns:
-        wake_loss: Scalar loss value
-    """
-    # Identify wake regions (normalized velocity < threshold)
-    wake_mask = (y_target < wake_threshold).float()
+    # Mask gradients (simple approximation for simplicity)
+    m_dx = mask[:, :, :, 1:] if mask is not None else 1.0
+    m_dy = mask[:, :, 1:, :] if mask is not None else 1.0
     
-    # Compute squared error in wake regions
-    wake_error = ((y_pred - y_target) ** 2) * wake_mask * sensor_mask
+    grad_loss = (((p_dx - t_dx)**2 * m_dx).mean() + ((p_dy - t_dy)**2 * m_dy).mean())
     
-    # Average over wake pixels only
-    wake_loss = wake_error.sum() / (wake_mask.sum() + 1e-8)
-    
-    return wake_loss
+    return mse + grad_weight * grad_loss
 
-
-def compute_peak_loss(y_pred, y_target, sensor_mask, percentile=90):
-    """
-    Enhanced peak loss that focuses on BOTH extremes:
-    - High wind speeds (acceleration around buildings)
-    - Low wind speeds (wake regions)
-    
-    Args:
-        y_pred: Model predictions [B, C, H, W]
-        y_target: Ground truth [B, C, H, W]
-        sensor_mask: Weighting mask [B, C, H, W]
-        percentile: Percentile threshold for identifying peaks
-    
-    Returns:
-        peak_loss: Scalar loss value
-    """
-    # Flatten for percentile computation
-    flat_target = y_target.flatten()
-    
-    # Get high and low thresholds
-    high_threshold = torch.quantile(flat_target, percentile / 100.0)
-    low_threshold = torch.quantile(flat_target, (100 - percentile) / 100.0)
-    
-    # Create masks for extreme regions
-    high_mask = (y_target >= high_threshold).float()
-    low_mask = (y_target <= low_threshold).float()
-    extreme_mask = torch.maximum(high_mask, low_mask)
-    
-    # Compute error in extreme regions
-    extreme_error = ((y_pred - y_target) ** 2) * extreme_mask * sensor_mask
-    peak_loss = extreme_error.sum() / (extreme_mask.sum() + 1e-8)
-    
-    return peak_loss
-
-
-def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
-                        grad_weight=0.0, spectral_weight=0.0, 
-                        peak_weight=0.0, wake_weight=0.0,
-                        return_components=False):
-    """
-    MODIFIED VERSION - Add wake_weight parameter
-    
-    Multi-component loss for FNO training:
-    1. MSE loss (pixel-wise)
-    2. Gradient loss (spatial derivatives)
-    3. Spectral loss (frequency domain)
-    4. Peak loss (extremes preservation)
-    5. Wake loss (low-speed regions) - NEW!
-    
-    Args:
-        y_pred: Predictions [B, C, H, W]
-        y_target: Ground truth [B, C, H, W]
-        sensor_mask: Spatial weighting mask [B, C, H, W]
-        grad_weight: Weight for gradient loss
-        spectral_weight: Weight for spectral loss
-        peak_weight: Weight for peak loss
-        wake_weight: Weight for wake loss (NEW)
-        return_components: Return dict of individual losses
-    
-    Returns:
-        total_loss: Weighted sum of all components
-        components: Dict of individual loss values (if return_components=True)
-    """
-    
-    # Default mask
-    if sensor_mask is None:
-        sensor_mask = torch.ones_like(y_pred)
-    
-    # === 1. MSE Loss (Base) ===
-    # Precision Fix: Acceleration Curb (Moved from physics_loss mechanism)
-    # If the target is acceleration (>0) and we over-predict it, punish harder.
-    diff = y_pred - y_target
-    penalty = torch.ones_like(diff)
-    # Target > 0 AND Pred > Target (Overshooting high wind)
-    high_wind_overshoot = (y_target > 0) & (diff > 0)
-    penalty[high_wind_overshoot] *= 1.0  # Relaxed from previous versions
-
-    mse_loss = ((diff**2 * penalty) * sensor_mask).sum() / (sensor_mask.sum() + 1e-8)
-    
-    # === 2. Gradient Loss (Spatial) ===
-    gradient_loss = torch.tensor(0.0, device=y_pred.device)
-    if grad_weight > 0:
-        # Compute gradients in x and y directions
-        pred_grad_x = y_pred[:, :, :, 1:] - y_pred[:, :, :, :-1]
-        pred_grad_y = y_pred[:, :, 1:, :] - y_pred[:, :, :-1, :]
-        
-        tgt_grad_x = y_target[:, :, :, 1:] - y_target[:, :, :, :-1]
-        tgt_grad_y = y_target[:, :, 1:, :] - y_target[:, :, :-1, :]
-        
-        # Match shapes for masking
-        mask_x = sensor_mask[:, :, :, 1:]
-        mask_y = sensor_mask[:, :, 1:, :]
-        
-        # L2 loss on gradients
-        grad_loss_x = (mask_x * (pred_grad_x - tgt_grad_x) ** 2).sum() / mask_x.sum()
-        grad_loss_y = (mask_y * (pred_grad_y - tgt_grad_y) ** 2).sum() / mask_y.sum()
-        
-        gradient_loss = grad_loss_x + grad_loss_y
-    
-    # === 3. Spectral Loss (Frequency Domain) ===
-    spectral_loss = torch.tensor(0.0, device=y_pred.device)
-    if spectral_weight > 0:
-        # FFT of predictions and targets
-        pred_fft = torch.fft.rfft2(y_pred, norm='ortho')
-        tgt_fft = torch.fft.rfft2(y_target, norm='ortho')
-        
-        # L2 loss in frequency domain
-        spectral_loss = torch.mean(torch.abs(pred_fft - tgt_fft) ** 2)
-    
-    # === 4. Peak Loss (Extremes) ===
-    peak_loss = torch.tensor(0.0, device=y_pred.device)
-    if peak_weight > 0:
-        peak_loss = compute_peak_loss(y_pred, y_target, sensor_mask)
-    
-    # === 5. Wake Loss (Low-Speed Regions) - NEW! ===
-    wake_loss = torch.tensor(0.0, device=y_pred.device)
-    if wake_weight > 0:
-        wake_loss = compute_wake_loss(y_pred, y_target, sensor_mask)
-    
-    # === Total Loss ===
-    total_loss = (mse_loss + 
-                  grad_weight * gradient_loss + 
-                  spectral_weight * spectral_loss + 
-                  peak_weight * peak_loss +
-                  wake_weight * wake_loss)
-    
-    if return_components:
-        components = {
-            'mse_loss': mse_loss.item(),
-            'gradient_loss': gradient_loss.item(),
-            'spectral_loss': spectral_loss.item(),
-            'peak_loss': peak_loss.item(),
-            'wake_loss': wake_loss.item(),
-        }
-        return total_loss, components
-    
-    return total_loss
+def sensor_weighted_mse(pred, target, sensor_mask=None):
+    # Backward compatibility
+    return physics_loss(pred, target, sensor_mask)
