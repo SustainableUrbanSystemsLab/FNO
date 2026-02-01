@@ -189,6 +189,7 @@ def main():
     x_npy = os.path.join(DATA_FOLDER, "X.npy")
     y_npy = os.path.join(DATA_FOLDER, "Y.npy")
     
+    if os.path.exists(x_npy) and os.path.exists(y_npy):
         if is_main_process(rank):
             print(f"Found Numpy arrays at {DATA_FOLDER}, loading with mmap...")
         
