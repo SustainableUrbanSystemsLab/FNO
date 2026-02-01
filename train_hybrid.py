@@ -242,7 +242,7 @@ def main():
         
         if os.path.exists(MODEL_OUT) and not args.fresh:
             if is_main_process(rank): print(f"Resuming weights: {MODEL_OUT}", flush=True)
-            model.load_state_dict(torch.load(MODEL_OUT, map_location=device, weights_only=False))
+            model.load_state_dict(torch.load(MODEL_OUT, map_location=device, weights_only=False), strict=False)
 
         if is_distributed: model = DDP(model, device_ids=[local_rank])
         
