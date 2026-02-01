@@ -9,7 +9,7 @@ Features:
 - Multiprocessing Data Preparation
 """
 
-import os, glob, numpy as np, pandas as pd, torch, hashlib, pickle, sys, argparse, time
+import os, glob, numpy as np, pandas as pd, torch, hashlib, pickle, sys, argparse, time, traceback
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, TensorDataset
@@ -118,6 +118,31 @@ def load_or_prepare_dataset(files, rank, is_main, num_workers):
         with open(cache_path, 'wb') as f: pickle.dump((Xs, Ys, Masks, chs), f)
     return Xs, Ys, Masks, chs
 
+class HybridNumpyDataset(torch.utils.data.Dataset):
+    """
+    Lazy-loading dataset for large mmap'd Numpy arrays.
+    Prevents OOM by only loading batches into RAM.
+    """
+    def __init__(self, x_path, y_path, sdf_scaling):
+        self.x_mmap = np.load(x_path, mmap_mode='c')
+        self.y_mmap = np.load(y_path, mmap_mode='c')
+        self.sdf_scaling = sdf_scaling
+        
+    def __len__(self):
+        return self.x_mmap.shape[0]
+        
+    def __getitem__(self, idx):
+        # We use .copy() to get an owned array that Pytorch can convert to a tensor properly
+        x = torch.from_numpy(self.x_mmap[idx].copy()).float()
+        y = torch.from_numpy(self.y_mmap[idx].copy()).float()
+        
+        # Compute mask on-the-fly (Fast for a single sample)
+        # SDF is channel 0
+        sdf_meters = x[0:1, :, :] * self.sdf_scaling
+        mask = 1.0 + 19.0 * torch.exp(-torch.clamp(sdf_meters, min=0.0) / 5.0)
+        
+        return x, y, mask
+
 # ============ Main Training ============
 def main():
     parser = argparse.ArgumentParser()
@@ -130,7 +155,8 @@ def main():
     local_rank, rank, world_size, is_distributed = setup_distributed()
     device = torch.device(f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
 
-    # Path detection
+    try:
+        # Path detection
     if sys.platform == 'win32':
         DATA_FOLDER = config.get('paths', {}).get('data_folder_windows', 'train_csv')
     else:
@@ -185,37 +211,28 @@ def main():
     EPOCHS = config.get('training', {}).get('epochs', 200)
     LR = config.get('training', {}).get('learning_rate', 5e-4)
     
+    if is_main_process(rank):
+        print(f"[Diag] Configured: Epochs={EPOCHS}, Batch={BATCH}, LR={LR}", flush=True)
+
     # Data Prep
     x_npy = os.path.join(DATA_FOLDER, "X.npy")
     y_npy = os.path.join(DATA_FOLDER, "Y.npy")
     
     if os.path.exists(x_npy) and os.path.exists(y_npy):
         if is_main_process(rank):
-            print(f"Found Numpy arrays at {DATA_FOLDER}, loading with mmap...")
+            print(f"Found Numpy arrays at {DATA_FOLDER}, preparing lazy-loading dataset...", flush=True)
         
-        # Use copy-on-write memory mapping to save RAM across DDP processes
-        X_all = torch.from_numpy(np.load(x_npy, mmap_mode='c')).float()
-        Y_all = torch.from_numpy(np.load(y_npy, mmap_mode='c')).float()
-        
-        if is_main_process(rank):
-            print(f"Loaded {X_all.shape[0]} samples. Shapes: X={X_all.shape}, Y={Y_all.shape}")
-        
-        # Generate mask from SDF (Assumed to be channel 0)
-        # We need unnormalized SDF (meters) for the exponential weighting.
-        # gh_to_fno.py normalizes SDF by dividing by 200.0.
-        sdf_all = X_all[:, 0:1, :, :]
-        sdf_max = sdf_all.max()
-        
-        # If SDF is normalized [0, 1], scale it back to meters [0, 200] for weighting
-        if sdf_max <= 5.0: # Heuristic: if max is small, it's normalized
-            sdf_meters = sdf_all * 200.0
-        else:
-            sdf_meters = sdf_all
-            
-        M_all = 1.0 + 19.0 * torch.exp(-torch.clamp(sdf_meters, min=0.0) / 5.0)
+        # Determine scaling for on-the-fly masking
+        # We just need a sample to check the range
+        temp_x = np.load(x_npy, mmap_mode='r')
+        sdf_max = temp_x[0, 0].max()
+        sdf_scaling = 200.0 if sdf_max <= 5.0 else 1.0
         
         if is_main_process(rank):
-            print(f"Mask Weights Calibrated (SDF max: {sdf_max:.2f}, Scaling applied: {sdf_max <= 5.0})")
+            print(f"Dataset Init: SDF max(sample)={sdf_max:.2f}, Scaling applied={sdf_scaling}", flush=True)
+            print(f"Total Samples: {temp_x.shape[0]}", flush=True)
+        
+        dataset = HybridNumpyDataset(x_npy, y_npy, sdf_scaling)
     else:
         # Fallback to CSV loading
         files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.csv"), recursive=True))
@@ -233,13 +250,17 @@ def main():
         def pad(t_list):
             return torch.stack([torch.nn.functional.pad(t, (0, max_w-t.shape[2], 0, max_h-t.shape[1])) for t in t_list])
         X_all, Y_all, M_all = pad(Xs), pad(Ys), pad(Masks)
+        dataset = TensorDataset(X_all, Y_all, M_all)
     
-    dataset = TensorDataset(X_all, Y_all, M_all)
     sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank) if is_distributed else None
-    loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, shuffle=(sampler is None))
+    loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, shuffle=(sampler is None), num_workers=2 if not is_distributed else 1)
+
+    # Get input channels from the first item
+    sample_x, _, _ = dataset[0]
+    in_channels = sample_x.shape[0]
 
     # Model
-    model = HybridFNO(in_channels=X_all.shape[1], hidden_channels=64).to(device)
+    model = HybridFNO(in_channels=in_channels, hidden_channels=64).to(device)
     
     # Optional: Load existing weights to resume training
     if os.path.exists(MODEL_OUT) and not args.fresh:
@@ -284,17 +305,152 @@ def main():
             running_loss += loss.item() * xb.shape[0]
 
         # Aggregate & Log
-        if is_distributed:
-            loss_tensor = torch.tensor(running_loss, device=device)
-            dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
-            running_loss = loss_tensor.item()
-        
-        avg_loss = running_loss / len(dataset)
+                    msg = f"[Diag] {name}: {p} | Exists: {exists}, IsDir: {isdir}, HasNPY: {has_npy}"
+                    print(msg)
+                    print(msg, file=sys.stderr) # Ensure it shows in .err too
+                return exists and isdir and has_npy # We prioritize NPY for hybrid
+
+            if check_path(ice_path, "ICE Path"):
+                DATA_FOLDER = ice_path
+            elif check_path(linux_path, "Linux Path"):
+                DATA_FOLDER = linux_path
+            else:
+                # Last ditch attempt: check common absolute locations if everything else failed
+                guesses = [
+                    "/storage/ice1/2/4/scratch/Training_Dataset",
+                    "/storage/ice1/2/4/athach7/Training_Dataset"
+                ]
+                for guess in guesses:
+                    if check_path(guess, "Hardcoded Guess"):
+                        DATA_FOLDER = guess
+                        break
+                else:
+                    DATA_FOLDER = os.path.join(os.path.dirname(__file__), 'train_csv')
+                    if is_main_process(rank):
+                        print(f"[Diag] Falling back to: {DATA_FOLDER}", file=sys.stderr)
+                
         if is_main_process(rank):
-            print(f"Epoch {epoch}/{EPOCHS} Loss: {avg_loss:.6e}")
-            if avg_loss < best_loss:
-                best_loss = avg_loss
-                torch.save(model.module.state_dict() if is_distributed else model.state_dict(), MODEL_OUT)
+            print(f"Using Data Folder: {os.path.abspath(DATA_FOLDER)}")
+
+        MODEL_OUT = "hybrid_fno_weights.pth"
+        CHECKPOINT_PATH = "checkpoint_hybrid.pth"
+        BATCH = config.get('training', {}).get('batch_size', 4)
+        EPOCHS = config.get('training', {}).get('epochs', 200)
+        LR = config.get('training', {}).get('learning_rate', 5e-4)
+        
+        if is_main_process(rank):
+            print(f"[Diag] Configured: Epochs={EPOCHS}, Batch={BATCH}, LR={LR}", flush=True)
+
+        # Data Prep
+        x_npy = os.path.join(DATA_FOLDER, "X.npy")
+        y_npy = os.path.join(DATA_FOLDER, "Y.npy")
+        
+        if os.path.exists(x_npy) and os.path.exists(y_npy):
+            if is_main_process(rank):
+                print(f"Found Numpy arrays at {DATA_FOLDER}, preparing lazy-loading dataset...", flush=True)
+            
+            # Determine scaling for on-the-fly masking
+            # We just need a sample to check the range
+            temp_x = np.load(x_npy, mmap_mode='r')
+            sdf_max = temp_x[0, 0].max()
+            sdf_scaling = 200.0 if sdf_max <= 5.0 else 1.0
+            
+            if is_main_process(rank):
+                print(f"Dataset Init: SDF max(sample)={sdf_max:.2f}, Scaling applied={sdf_scaling}", flush=True)
+                print(f"Total Samples: {temp_x.shape[0]}", flush=True)
+            
+            dataset = HybridNumpyDataset(x_npy, y_npy, sdf_scaling)
+        else:
+            # Fallback to CSV loading
+            files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.csv"), recursive=True))
+            if not files:
+                raise RuntimeError(f"No CSV files (or X.npy/Y.npy) found in {DATA_FOLDER}. Please check your config.toml paths.")
+                
+            num_workers = max(1, cpu_count() // 2)
+            Xs, Ys, Masks, chs = load_or_prepare_dataset(files, rank, is_main_process(rank), num_workers)
+            
+            if not Xs:
+                raise RuntimeError(f"Failed to load any valid samples from {len(files)} files.")
+            
+            # Padding
+            max_h = max(t.shape[1] for t in Xs); max_w = max(t.shape[2] for t in Xs)
+            def pad(t_list):
+                return torch.stack([torch.nn.functional.pad(t, (0, max_w-t.shape[2], 0, max_h-t.shape[1])) for t in t_list])
+            X_all, Y_all, M_all = pad(Xs), pad(Ys), pad(Masks)
+            dataset = TensorDataset(X_all, Y_all, M_all)
+        
+        sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank) if is_distributed else None
+        loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, shuffle=(sampler is None), num_workers=2 if not is_distributed else 1)
+
+        # Get input channels from the first item
+        sample_x, _, _ = dataset[0]
+        in_channels = sample_x.shape[0]
+
+        # Model
+        model = HybridFNO(in_channels=in_channels, hidden_channels=64).to(device)
+        
+        # Optional: Load existing weights to resume training
+        if os.path.exists(MODEL_OUT) and not args.fresh:
+            if is_main_process(rank):
+                print(f"Resuming from existing weights: {MODEL_OUT}")
+            state_dict = torch.load(MODEL_OUT, map_location=device, weights_only=True)
+            model.load_state_dict(state_dict)
+
+        if is_distributed: model = DDP(model, device_ids=[local_rank])
+        
+        opt = torch.optim.AdamW(model.parameters(), lr=LR)
+        l2_loss = LpLoss(d=2, p=2)
+        h1_loss = H1Loss(d=2)
+
+        if is_main_process(rank):
+            print(f"Hybrid FNO Training Started on {world_size} GPUs")
+            logger = TrainingLogger(output_dir="training_logs")
+        
+        # Initialize best_loss from current model if resuming
+        best_loss = float('inf')
+        if os.path.exists(MODEL_OUT) and not args.fresh:
+            # We don't have the previous loss easily, so we just set it to inf 
+            # to ensure the first epoch of resumed training saves if it improves.
+            pass
+        for epoch in range(1, EPOCHS + 1):
+            if is_distributed: sampler.set_epoch(epoch)
+            model.train()
+            running_loss = 0.0
+            
+            for xb, yb, mb in loader:
+                xb, yb, mb = xb.to(device), yb.to(device), mb.to(device)
+                pred = model(xb)
+                
+                # Hybrid Loss
+                loss_data = l2_loss(pred * mb, yb * mb)
+                loss_grad = h1_loss(pred * mb, yb * mb)
+                loss_phys = physics_informed_loss(pred, yb, xb, device)
+                
+                loss = loss_data + 0.3 * loss_grad + 0.1 * loss_phys
+                
+                opt.zero_grad(); loss.backward(); opt.step()
+                running_loss += loss.item() * xb.shape[0]
+
+            # Aggregate & Log
+            if is_distributed:
+                loss_tensor = torch.tensor(running_loss, device=device)
+                dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
+                running_loss = loss_tensor.item()
+            
+            avg_loss = running_loss / len(dataset)
+            if is_main_process(rank):
+                print(f"Epoch {epoch}/{EPOCHS} Loss: {avg_loss:.6e}", flush=True)
+                if avg_loss < best_loss:
+                    best_loss = avg_loss
+                    save_obj = model.module.state_dict() if is_distributed else model.state_dict()
+                    torch.save(save_obj, MODEL_OUT)
+                    print(f"Best model saved with loss {best_loss:.6e}", flush=True)
+
+    except Exception as e:
+        print(f"CRITICAL ERROR on Rank {rank}: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
+        dist.abort() if is_distributed else sys.exit(1)
 
     cleanup_distributed()
 
