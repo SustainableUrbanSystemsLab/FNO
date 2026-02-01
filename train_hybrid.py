@@ -156,170 +156,39 @@ def main():
     device = torch.device(f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
 
     try:
-        # Path detection
-    if sys.platform == 'win32':
-        DATA_FOLDER = config.get('paths', {}).get('data_folder_windows', 'train_csv')
-    else:
-        linux_path = config.get('paths', {}).get('data_folder_linux', '')
-        ice_path = config.get('paths', {}).get('data_folder_ice', '')
-        
-        if is_main_process(rank):
-            print(f"[Diag] Raw Config - ICE: {ice_path}, Linux: {linux_path}", file=sys.stderr)
-        
-        if ice_path: ice_path = os.path.expanduser(ice_path)
-        if linux_path: linux_path = os.path.expanduser(linux_path)
-        
-        def check_path(p, name):
-            if not p: return False
-            exists = os.path.exists(p)
-            isdir = os.path.isdir(p)
-            has_npy = False
-            if exists and isdir:
-                has_npy = os.path.exists(os.path.join(p, "X.npy")) and os.path.exists(os.path.join(p, "Y.npy"))
+        # 1. Path detection
+        if sys.platform == 'win32':
+            DATA_FOLDER = config.get('paths', {}).get('data_folder_windows', 'train_csv')
+        else:
+            linux_path = config.get('paths', {}).get('data_folder_linux', '')
+            ice_path = config.get('paths', {}).get('data_folder_ice', '')
             
             if is_main_process(rank):
-                msg = f"[Diag] {name}: {p} | Exists: {exists}, IsDir: {isdir}, HasNPY: {has_npy}"
-                print(msg)
-                print(msg, file=sys.stderr) # Ensure it shows in .err too
-            return exists and isdir and has_npy # We prioritize NPY for hybrid
-
-        if check_path(ice_path, "ICE Path"):
-            DATA_FOLDER = ice_path
-        elif check_path(linux_path, "Linux Path"):
-            DATA_FOLDER = linux_path
-        else:
-            # Last ditch attempt: check common absolute locations if everything else failed
-            guesses = [
-                "/storage/ice1/2/4/scratch/Training_Dataset",
-                "/storage/ice1/2/4/athach7/Training_Dataset"
-            ]
-            for guess in guesses:
-                if check_path(guess, "Hardcoded Guess"):
-                    DATA_FOLDER = guess
-                    break
-            else:
-                DATA_FOLDER = os.path.join(os.path.dirname(__file__), 'train_csv')
+                print(f"[Diag] Raw Config - ICE: {ice_path}, Linux: {linux_path}", file=sys.stderr)
+            
+            if ice_path: ice_path = os.path.expanduser(ice_path)
+            if linux_path: linux_path = os.path.expanduser(linux_path)
+            
+            def check_path(p, name):
+                if not p: return False
+                exists = os.path.exists(p)
+                isdir = os.path.isdir(p)
+                has_npy = False
+                if exists and isdir:
+                    has_npy = os.path.exists(os.path.join(p, "X.npy")) and os.path.exists(os.path.join(p, "Y.npy"))
+                
                 if is_main_process(rank):
-                    print(f"[Diag] Falling back to: {DATA_FOLDER}", file=sys.stderr)
-            
-    if is_main_process(rank):
-        print(f"Using Data Folder: {os.path.abspath(DATA_FOLDER)}")
-
-    MODEL_OUT = "hybrid_fno_weights.pth"
-    CHECKPOINT_PATH = "checkpoint_hybrid.pth"
-    BATCH = config.get('training', {}).get('batch_size', 4)
-    EPOCHS = config.get('training', {}).get('epochs', 200)
-    LR = config.get('training', {}).get('learning_rate', 5e-4)
-    
-    if is_main_process(rank):
-        print(f"[Diag] Configured: Epochs={EPOCHS}, Batch={BATCH}, LR={LR}", flush=True)
-
-    # Data Prep
-    x_npy = os.path.join(DATA_FOLDER, "X.npy")
-    y_npy = os.path.join(DATA_FOLDER, "Y.npy")
-    
-    if os.path.exists(x_npy) and os.path.exists(y_npy):
-        if is_main_process(rank):
-            print(f"Found Numpy arrays at {DATA_FOLDER}, preparing lazy-loading dataset...", flush=True)
-        
-        # Determine scaling for on-the-fly masking
-        # We just need a sample to check the range
-        temp_x = np.load(x_npy, mmap_mode='r')
-        sdf_max = temp_x[0, 0].max()
-        sdf_scaling = 200.0 if sdf_max <= 5.0 else 1.0
-        
-        if is_main_process(rank):
-            print(f"Dataset Init: SDF max(sample)={sdf_max:.2f}, Scaling applied={sdf_scaling}", flush=True)
-            print(f"Total Samples: {temp_x.shape[0]}", flush=True)
-        
-        dataset = HybridNumpyDataset(x_npy, y_npy, sdf_scaling)
-    else:
-        # Fallback to CSV loading
-        files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.csv"), recursive=True))
-        if not files:
-            raise RuntimeError(f"No CSV files (or X.npy/Y.npy) found in {DATA_FOLDER}. Please check your config.toml paths.")
-            
-        num_workers = max(1, cpu_count() // 2)
-        Xs, Ys, Masks, chs = load_or_prepare_dataset(files, rank, is_main_process(rank), num_workers)
-        
-        if not Xs:
-            raise RuntimeError(f"Failed to load any valid samples from {len(files)} files.")
-        
-        # Padding
-        max_h = max(t.shape[1] for t in Xs); max_w = max(t.shape[2] for t in Xs)
-        def pad(t_list):
-            return torch.stack([torch.nn.functional.pad(t, (0, max_w-t.shape[2], 0, max_h-t.shape[1])) for t in t_list])
-        X_all, Y_all, M_all = pad(Xs), pad(Ys), pad(Masks)
-        dataset = TensorDataset(X_all, Y_all, M_all)
-    
-    sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank) if is_distributed else None
-    loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, shuffle=(sampler is None), num_workers=2 if not is_distributed else 1)
-
-    # Get input channels from the first item
-    sample_x, _, _ = dataset[0]
-    in_channels = sample_x.shape[0]
-
-    # Model
-    model = HybridFNO(in_channels=in_channels, hidden_channels=64).to(device)
-    
-    # Optional: Load existing weights to resume training
-    if os.path.exists(MODEL_OUT) and not args.fresh:
-        if is_main_process(rank):
-            print(f"Resuming from existing weights: {MODEL_OUT}")
-        state_dict = torch.load(MODEL_OUT, map_location=device, weights_only=True)
-        model.load_state_dict(state_dict)
-
-    if is_distributed: model = DDP(model, device_ids=[local_rank])
-    
-    opt = torch.optim.AdamW(model.parameters(), lr=LR)
-    l2_loss = LpLoss(d=2, p=2)
-    h1_loss = H1Loss(d=2)
-
-    if is_main_process(rank):
-        print(f"Hybrid FNO Training Started on {world_size} GPUs")
-        logger = TrainingLogger(output_dir="training_logs")
-    
-    # Initialize best_loss from current model if resuming
-    best_loss = float('inf')
-    if os.path.exists(MODEL_OUT) and not args.fresh:
-        # We don't have the previous loss easily, so we just set it to inf 
-        # to ensure the first epoch of resumed training saves if it improves.
-        pass
-    for epoch in range(1, EPOCHS + 1):
-        if is_distributed: sampler.set_epoch(epoch)
-        model.train()
-        running_loss = 0.0
-        
-        for xb, yb, mb in loader:
-            xb, yb, mb = xb.to(device), yb.to(device), mb.to(device)
-            pred = model(xb)
-            
-            # Hybrid Loss
-            loss_data = l2_loss(pred * mb, yb * mb)
-            loss_grad = h1_loss(pred * mb, yb * mb)
-            loss_phys = physics_informed_loss(pred, yb, xb, device)
-            
-            loss = loss_data + 0.3 * loss_grad + 0.1 * loss_phys
-            
-            opt.zero_grad(); loss.backward(); opt.step()
-            running_loss += loss.item() * xb.shape[0]
-
-        # Aggregate & Log
                     msg = f"[Diag] {name}: {p} | Exists: {exists}, IsDir: {isdir}, HasNPY: {has_npy}"
-                    print(msg)
-                    print(msg, file=sys.stderr) # Ensure it shows in .err too
-                return exists and isdir and has_npy # We prioritize NPY for hybrid
+                    print(msg, flush=True)
+                    print(msg, file=sys.stderr, flush=True)
+                return exists and isdir and has_npy
 
             if check_path(ice_path, "ICE Path"):
                 DATA_FOLDER = ice_path
             elif check_path(linux_path, "Linux Path"):
                 DATA_FOLDER = linux_path
             else:
-                # Last ditch attempt: check common absolute locations if everything else failed
-                guesses = [
-                    "/storage/ice1/2/4/scratch/Training_Dataset",
-                    "/storage/ice1/2/4/athach7/Training_Dataset"
-                ]
+                guesses = ["/storage/ice1/2/4/scratch/Training_Dataset", "/storage/ice1/2/4/athach7/Training_Dataset"]
                 for guess in guesses:
                     if check_path(guess, "Hardcoded Guess"):
                         DATA_FOLDER = guess
@@ -327,111 +196,75 @@ def main():
                 else:
                     DATA_FOLDER = os.path.join(os.path.dirname(__file__), 'train_csv')
                     if is_main_process(rank):
-                        print(f"[Diag] Falling back to: {DATA_FOLDER}", file=sys.stderr)
+                        print(f"[Diag] Falling back to local: {DATA_FOLDER}", file=sys.stderr, flush=True)
                 
         if is_main_process(rank):
-            print(f"Using Data Folder: {os.path.abspath(DATA_FOLDER)}")
+            print(f"Using Data Folder: {os.path.abspath(DATA_FOLDER)}", flush=True)
 
+        # 2. Config & Training Params
         MODEL_OUT = "hybrid_fno_weights.pth"
-        CHECKPOINT_PATH = "checkpoint_hybrid.pth"
         BATCH = config.get('training', {}).get('batch_size', 4)
-        EPOCHS = config.get('training', {}).get('epochs', 200)
+        EPOCHS = config.get('training', {}).get('epochs', 1000)
         LR = config.get('training', {}).get('learning_rate', 5e-4)
         
         if is_main_process(rank):
             print(f"[Diag] Configured: Epochs={EPOCHS}, Batch={BATCH}, LR={LR}", flush=True)
 
-        # Data Prep
+        # 3. Data Prep (Hybrid Lazy Loading)
         x_npy = os.path.join(DATA_FOLDER, "X.npy")
         y_npy = os.path.join(DATA_FOLDER, "Y.npy")
         
         if os.path.exists(x_npy) and os.path.exists(y_npy):
             if is_main_process(rank):
-                print(f"Found Numpy arrays at {DATA_FOLDER}, preparing lazy-loading dataset...", flush=True)
-            
-            # Determine scaling for on-the-fly masking
-            # We just need a sample to check the range
+                print(f"Loading via HybridNumpyDataset (mmap)...", flush=True)
             temp_x = np.load(x_npy, mmap_mode='r')
             sdf_max = temp_x[0, 0].max()
             sdf_scaling = 200.0 if sdf_max <= 5.0 else 1.0
-            
-            if is_main_process(rank):
-                print(f"Dataset Init: SDF max(sample)={sdf_max:.2f}, Scaling applied={sdf_scaling}", flush=True)
-                print(f"Total Samples: {temp_x.shape[0]}", flush=True)
-            
             dataset = HybridNumpyDataset(x_npy, y_npy, sdf_scaling)
         else:
-            # Fallback to CSV loading
+            if is_main_process(rank):
+                print(f"Falling back to CSV loading (Memory Intensive)...", flush=True)
             files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.csv"), recursive=True))
-            if not files:
-                raise RuntimeError(f"No CSV files (or X.npy/Y.npy) found in {DATA_FOLDER}. Please check your config.toml paths.")
-                
+            if not files: raise RuntimeError(f"No Data found in {DATA_FOLDER}")
             num_workers = max(1, cpu_count() // 2)
-            Xs, Ys, Masks, chs = load_or_prepare_dataset(files, rank, is_main_process(rank), num_workers)
-            
-            if not Xs:
-                raise RuntimeError(f"Failed to load any valid samples from {len(files)} files.")
-            
-            # Padding
+            Xs, Ys, Masks, _ = load_or_prepare_dataset(files, rank, is_main_process(rank), num_workers)
             max_h = max(t.shape[1] for t in Xs); max_w = max(t.shape[2] for t in Xs)
             def pad(t_list):
                 return torch.stack([torch.nn.functional.pad(t, (0, max_w-t.shape[2], 0, max_h-t.shape[1])) for t in t_list])
-            X_all, Y_all, M_all = pad(Xs), pad(Ys), pad(Masks)
-            dataset = TensorDataset(X_all, Y_all, M_all)
+            dataset = TensorDataset(pad(Xs), pad(Ys), pad(Masks))
         
         sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank) if is_distributed else None
         loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, shuffle=(sampler is None), num_workers=2 if not is_distributed else 1)
 
-        # Get input channels from the first item
+        # 4. Model & Optimization
         sample_x, _, _ = dataset[0]
-        in_channels = sample_x.shape[0]
-
-        # Model
-        model = HybridFNO(in_channels=in_channels, hidden_channels=64).to(device)
+        model = HybridFNO(in_channels=sample_x.shape[0], hidden_channels=64).to(device)
         
-        # Optional: Load existing weights to resume training
         if os.path.exists(MODEL_OUT) and not args.fresh:
-            if is_main_process(rank):
-                print(f"Resuming from existing weights: {MODEL_OUT}")
-            state_dict = torch.load(MODEL_OUT, map_location=device, weights_only=True)
-            model.load_state_dict(state_dict)
+            if is_main_process(rank): print(f"Resuming weights: {MODEL_OUT}", flush=True)
+            model.load_state_dict(torch.load(MODEL_OUT, map_location=device, weights_only=True))
 
         if is_distributed: model = DDP(model, device_ids=[local_rank])
         
         opt = torch.optim.AdamW(model.parameters(), lr=LR)
-        l2_loss = LpLoss(d=2, p=2)
-        h1_loss = H1Loss(d=2)
-
-        if is_main_process(rank):
-            print(f"Hybrid FNO Training Started on {world_size} GPUs")
-            logger = TrainingLogger(output_dir="training_logs")
+        l2_loss = LpLoss(d=2, p=2); h1_loss = H1Loss(d=2)
+        if is_main_process(rank): logger = TrainingLogger(output_dir="training_logs")
         
-        # Initialize best_loss from current model if resuming
         best_loss = float('inf')
-        if os.path.exists(MODEL_OUT) and not args.fresh:
-            # We don't have the previous loss easily, so we just set it to inf 
-            # to ensure the first epoch of resumed training saves if it improves.
-            pass
         for epoch in range(1, EPOCHS + 1):
             if is_distributed: sampler.set_epoch(epoch)
             model.train()
             running_loss = 0.0
-            
             for xb, yb, mb in loader:
                 xb, yb, mb = xb.to(device), yb.to(device), mb.to(device)
                 pred = model(xb)
-                
-                # Hybrid Loss
                 loss_data = l2_loss(pred * mb, yb * mb)
                 loss_grad = h1_loss(pred * mb, yb * mb)
                 loss_phys = physics_informed_loss(pred, yb, xb, device)
-                
                 loss = loss_data + 0.3 * loss_grad + 0.1 * loss_phys
-                
                 opt.zero_grad(); loss.backward(); opt.step()
                 running_loss += loss.item() * xb.shape[0]
 
-            # Aggregate & Log
             if is_distributed:
                 loss_tensor = torch.tensor(running_loss, device=device)
                 dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
@@ -442,15 +275,14 @@ def main():
                 print(f"Epoch {epoch}/{EPOCHS} Loss: {avg_loss:.6e}", flush=True)
                 if avg_loss < best_loss:
                     best_loss = avg_loss
-                    save_obj = model.module.state_dict() if is_distributed else model.state_dict()
-                    torch.save(save_obj, MODEL_OUT)
-                    print(f"Best model saved with loss {best_loss:.6e}", flush=True)
+                    torch.save(model.module.state_dict() if is_distributed else model.state_dict(), MODEL_OUT)
+                    print(f"   * Best model saved (Loss: {best_loss:.6e})", flush=True)
 
     except Exception as e:
-        print(f"CRITICAL ERROR on Rank {rank}: {e}", file=sys.stderr)
+        print(f"CRITICAL ERROR on Rank {rank}: {e}", file=sys.stderr, flush=True)
         traceback.print_exc(file=sys.stderr)
-        sys.stderr.flush()
-        dist.abort() if is_distributed else sys.exit(1)
+        if is_distributed: dist.abort()
+        sys.exit(1)
 
     cleanup_distributed()
 
