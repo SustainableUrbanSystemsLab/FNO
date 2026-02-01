@@ -242,7 +242,7 @@ def main():
         
         if os.path.exists(MODEL_OUT) and not args.fresh:
             if is_main_process(rank): print(f"Resuming weights: {MODEL_OUT}", flush=True)
-            model.load_state_dict(torch.load(MODEL_OUT, map_location=device, weights_only=True))
+            model.load_state_dict(torch.load(MODEL_OUT, map_location=device, weights_only=False))
 
         if is_distributed: model = DDP(model, device_ids=[local_rank])
         
@@ -281,7 +281,7 @@ def main():
     except Exception as e:
         print(f"CRITICAL ERROR on Rank {rank}: {e}", file=sys.stderr, flush=True)
         traceback.print_exc(file=sys.stderr)
-        if is_distributed: dist.abort()
+        if is_distributed: cleanup_distributed()
         sys.exit(1)
 
     cleanup_distributed()
