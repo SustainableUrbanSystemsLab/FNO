@@ -134,9 +134,19 @@ def main():
     if sys.platform == 'win32':
         DATA_FOLDER = config.get('paths', {}).get('data_folder_windows', 'train_csv')
     else:
-        linux_path = config.get('paths', {}).get('data_folder_linux', 'train_csv')
+        linux_path = config.get('paths', {}).get('data_folder_linux', '')
         ice_path = config.get('paths', {}).get('data_folder_ice', '')
-        DATA_FOLDER = ice_path if ice_path and os.path.exists(ice_path) else linux_path
+        
+        # Priority: ICE > Linux > local 'train_csv'
+        if ice_path and os.path.exists(ice_path) and glob.glob(os.path.join(ice_path, "*.csv")):
+            DATA_FOLDER = ice_path
+        elif linux_path and os.path.exists(linux_path) and glob.glob(os.path.join(linux_path, "*.csv")):
+            DATA_FOLDER = linux_path
+        else:
+            DATA_FOLDER = 'train_csv' # Final fallback to local folder
+            
+    if is_main_process(rank):
+        print(f"Using Data Folder: {DATA_FOLDER}")
 
     MODEL_OUT = "hybrid_fno_weights.pth"
     CHECKPOINT_PATH = "checkpoint_hybrid.pth"
@@ -146,8 +156,14 @@ def main():
     
     # Data Prep
     files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.csv"), recursive=True))
+    if not files:
+        raise RuntimeError(f"No CSV files found in {DATA_FOLDER}. Please check your config.toml paths.")
+        
     num_workers = max(1, cpu_count() // 2)
     Xs, Ys, Masks, chs = load_or_prepare_dataset(files, rank, is_main_process(rank), num_workers)
+    
+    if not Xs:
+        raise RuntimeError(f"Failed to load any valid samples from {len(files)} files.")
     
     # Padding
     max_h = max(t.shape[1] for t in Xs); max_w = max(t.shape[2] for t in Xs)
