@@ -140,16 +140,38 @@ def main():
         if ice_path: ice_path = os.path.expanduser(ice_path)
         if linux_path: linux_path = os.path.expanduser(linux_path)
         
-        # Priority: ICE > Linux > local 'train_csv'
-        if ice_path and os.path.exists(ice_path) and glob.glob(os.path.join(ice_path, "*.csv")):
+        def check_path(p, name):
+            if not p: return False
+            exists = os.path.exists(p)
+            isdir = os.path.isdir(p)
+            csv_count = 0
+            has_npy = False
+            if exists and isdir:
+                # Check for X.npy/Y.npy pair
+                has_npy = os.path.exists(os.path.join(p, "X.npy")) and os.path.exists(os.path.join(p, "Y.npy"))
+                
+                # Fast check for at least one CSV
+                if not has_npy:
+                    for _ in glob.iglob(os.path.join(p, "**/*.csv"), recursive=True):
+                        csv_count += 1
+                        break
+            
+            if is_main_process(rank):
+                print(f"[Diag] Checking {name}: {p}")
+                print(f"       Exists: {exists}, IsDir: {isdir}, HasCSVs: {csv_count > 0}, HasNPY: {has_npy}")
+            return exists and isdir and (csv_count > 0 or has_npy)
+
+        if check_path(ice_path, "ICE Path"):
             DATA_FOLDER = ice_path
-        elif linux_path and os.path.exists(linux_path) and glob.glob(os.path.join(linux_path, "*.csv")):
+        elif check_path(linux_path, "Linux Path"):
             DATA_FOLDER = linux_path
         else:
-            DATA_FOLDER = os.path.abspath('train_csv') # Final fallback to local folder
+            DATA_FOLDER = os.path.join(os.path.dirname(__file__), 'train_csv')
+            if is_main_process(rank):
+                print(f"[Diag] Falling back to: {DATA_FOLDER}")
             
     if is_main_process(rank):
-        print(f"Using Data Folder: {DATA_FOLDER}")
+        print(f"Using Data Folder: {os.path.abspath(DATA_FOLDER)}")
 
     MODEL_OUT = "hybrid_fno_weights.pth"
     CHECKPOINT_PATH = "checkpoint_hybrid.pth"
@@ -158,21 +180,39 @@ def main():
     LR = config.get('training', {}).get('learning_rate', 5e-4)
     
     # Data Prep
-    files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.csv"), recursive=True))
-    if not files:
-        raise RuntimeError(f"No CSV files found in {DATA_FOLDER}. Please check your config.toml paths.")
+    x_npy = os.path.join(DATA_FOLDER, "X.npy")
+    y_npy = os.path.join(DATA_FOLDER, "Y.npy")
+    
+    if os.path.exists(x_npy) and os.path.exists(y_npy):
+        if is_main_process(rank):
+            print(f"Found Numpy arrays at {DATA_FOLDER}, loading directly...")
+        X_all = torch.from_numpy(np.load(x_npy)).float()
+        Y_all = torch.from_numpy(np.load(y_npy)).float()
         
-    num_workers = max(1, cpu_count() // 2)
-    Xs, Ys, Masks, chs = load_or_prepare_dataset(files, rank, is_main_process(rank), num_workers)
-    
-    if not Xs:
-        raise RuntimeError(f"Failed to load any valid samples from {len(files)} files.")
-    
-    # Padding
-    max_h = max(t.shape[1] for t in Xs); max_w = max(t.shape[2] for t in Xs)
-    def pad(t_list):
-        return torch.stack([torch.nn.functional.pad(t, (0, max_w-t.shape[2], 0, max_h-t.shape[1])) for t in t_list])
-    X_all, Y_all, M_all = pad(Xs), pad(Ys), pad(Masks)
+        # Generate mask from SDF (Assumed to be channel 0)
+        # Weight = 1.0 + 19.0 * exp(-SDF / 5.0)
+        sdf_all = X_all[:, 0:1, :, :]
+        M_all = 1.0 + 19.0 * torch.exp(-torch.clamp(sdf_all, min=0.0) / 5.0)
+        
+        if is_main_process(rank):
+            print(f"Loaded {X_all.shape[0]} samples. Shapes: X={X_all.shape}, Y={Y_all.shape}")
+    else:
+        # Fallback to CSV loading
+        files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.csv"), recursive=True))
+        if not files:
+            raise RuntimeError(f"No CSV files (or X.npy/Y.npy) found in {DATA_FOLDER}. Please check your config.toml paths.")
+            
+        num_workers = max(1, cpu_count() // 2)
+        Xs, Ys, Masks, chs = load_or_prepare_dataset(files, rank, is_main_process(rank), num_workers)
+        
+        if not Xs:
+            raise RuntimeError(f"Failed to load any valid samples from {len(files)} files.")
+        
+        # Padding
+        max_h = max(t.shape[1] for t in Xs); max_w = max(t.shape[2] for t in Xs)
+        def pad(t_list):
+            return torch.stack([torch.nn.functional.pad(t, (0, max_w-t.shape[2], 0, max_h-t.shape[1])) for t in t_list])
+        X_all, Y_all, M_all = pad(Xs), pad(Ys), pad(Masks)
     
     dataset = TensorDataset(X_all, Y_all, M_all)
     sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank) if is_distributed else None
