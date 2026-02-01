@@ -137,6 +137,9 @@ def main():
         linux_path = config.get('paths', {}).get('data_folder_linux', '')
         ice_path = config.get('paths', {}).get('data_folder_ice', '')
         
+        if is_main_process(rank):
+            print(f"[Diag] Raw Config - ICE: {ice_path}, Linux: {linux_path}", file=sys.stderr)
+        
         if ice_path: ice_path = os.path.expanduser(ice_path)
         if linux_path: linux_path = os.path.expanduser(linux_path)
         
@@ -144,31 +147,29 @@ def main():
             if not p: return False
             exists = os.path.exists(p)
             isdir = os.path.isdir(p)
-            csv_count = 0
             has_npy = False
             if exists and isdir:
-                # Check for X.npy/Y.npy pair
                 has_npy = os.path.exists(os.path.join(p, "X.npy")) and os.path.exists(os.path.join(p, "Y.npy"))
-                
-                # Fast check for at least one CSV
-                if not has_npy:
-                    for _ in glob.iglob(os.path.join(p, "**/*.csv"), recursive=True):
-                        csv_count += 1
-                        break
             
             if is_main_process(rank):
-                print(f"[Diag] Checking {name}: {p}")
-                print(f"       Exists: {exists}, IsDir: {isdir}, HasCSVs: {csv_count > 0}, HasNPY: {has_npy}")
-            return exists and isdir and (csv_count > 0 or has_npy)
+                msg = f"[Diag] {name}: {p} | Exists: {exists}, IsDir: {isdir}, HasNPY: {has_npy}"
+                print(msg)
+                print(msg, file=sys.stderr) # Ensure it shows in .err too
+            return exists and isdir and has_npy # We prioritize NPY for hybrid
 
         if check_path(ice_path, "ICE Path"):
             DATA_FOLDER = ice_path
         elif check_path(linux_path, "Linux Path"):
             DATA_FOLDER = linux_path
         else:
-            DATA_FOLDER = os.path.join(os.path.dirname(__file__), 'train_csv')
-            if is_main_process(rank):
-                print(f"[Diag] Falling back to: {DATA_FOLDER}")
+            # Last ditch attempt: check common absolute locations if everything else failed
+            abs_guess = "/storage/ice1/2/4/athach7/Training_Dataset"
+            if check_path(abs_guess, "Hardcoded Guess"):
+                DATA_FOLDER = abs_guess
+            else:
+                DATA_FOLDER = os.path.join(os.path.dirname(__file__), 'train_csv')
+                if is_main_process(rank):
+                    print(f"[Diag] Falling back to: {DATA_FOLDER}", file=sys.stderr)
             
     if is_main_process(rank):
         print(f"Using Data Folder: {os.path.abspath(DATA_FOLDER)}")
