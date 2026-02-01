@@ -53,11 +53,11 @@ for CSV in tqdm(files, desc="Hybrid Inference"):
         if model is None:
             # Init Hybrid Model (Must match training params)
             model = HybridFNO(in_channels=X.shape[1], hidden_channels=64).to(DEVICE)
-            state_dict = torch.load(MODEL_PATH, map_location=DEVICE)
+            state_dict = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
             
-            # Remove DDP prefix if present
-            new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-            model.load_state_dict(new_state_dict)
+            # Remove DDP prefix if present and ignore _metadata
+            new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items() if k != "_metadata"}
+            model.load_state_dict(new_state_dict, strict=False)
             model.eval()
 
         with torch.no_grad():
