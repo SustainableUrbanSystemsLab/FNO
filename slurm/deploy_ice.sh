@@ -48,9 +48,13 @@ if [ -f "$CONFIG_FILE" ]; then
         ICE_SECTION=$(sed -n '/^\[ice\]/,$p' "$CONFIG_FILE")
     fi
 
-    ICE_ACCOUNT=$(echo "$ICE_SECTION" | grep -E "^\s*account\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
-    ICE_PARTITION=$(echo "$ICE_SECTION" | grep -E "^\s*partition\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
-    ICE_WALLTIME=$(echo "$ICE_SECTION" | grep -E "^\s*walltime\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
+    ICE_ACCOUNT=$(echo "$ICE_SECTION" | grep -E "^\s*account\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' "' | tr -d "'")
+    ICE_PARTITION=$(echo "$ICE_SECTION" | grep -E "^\s*partition\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' "' | tr -d "'")
+    ICE_WALLTIME=$(echo "$ICE_SECTION" | grep -E "^\s*walltime\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' "' | tr -d "'")
+    
+    if [ -n "$ICE_WALLTIME" ]; then
+        SOURCE="config.toml [ice]"
+    fi
 else
     echo "Warning: $CONFIG_FILE not found."
     ICE_ACCOUNT="coc" # Default fallback
@@ -63,7 +67,7 @@ if [ -z "$ICE_ACCOUNT" ]; then
 fi
 
 if [ -z "$ICE_WALLTIME" ]; then
-    ICE_WALLTIME="07:59:00"
+    ICE_WALLTIME="00:10:00"
 fi
 
 echo "=========================================="
@@ -71,7 +75,7 @@ echo " Preparing ICE Deployment"
 echo " GPU Requested: $GPU_TYPE x $NUM_GPUS ($SLURM_GPU)"
 echo " Config file: $CONFIG_FILE"
 echo " Account: $ICE_ACCOUNT"
-echo " Walltime: $ICE_WALLTIME"
+echo " Walltime: $ICE_WALLTIME (Source: $SOURCE)"
 echo "=========================================="
 
 mkdir -p logs
