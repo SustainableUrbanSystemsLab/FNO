@@ -44,6 +44,7 @@ if [ -f "$CONFIG_FILE" ]; then
     # Look for [ice] section first
     ICE_ACCOUNT=$(sed -n '/^\[ice\]/,/^\[/p' "$CONFIG_FILE" | grep -E "^account\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
     ICE_PARTITION=$(sed -n '/^\[ice\]/,/^\[/p' "$CONFIG_FILE" | grep -E "^partition\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
+    ICE_WALLTIME=$(sed -n '/^\[ice\]/,/^\[/p' "$CONFIG_FILE" | grep -E "^walltime\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
 else
     echo "Warning: $CONFIG_FILE not found."
     ICE_ACCOUNT="coc" # Default fallback
@@ -55,18 +56,23 @@ if [ -z "$ICE_ACCOUNT" ]; then
     ICE_ACCOUNT="coc"
 fi
 
+if [ -z "$ICE_WALLTIME" ]; then
+    ICE_WALLTIME="07:59:00"
+fi
+
 echo "=========================================="
 echo " Preparing ICE Deployment"
 echo " GPU Requested: $GPU_TYPE x $NUM_GPUS ($SLURM_GPU)"
 echo " Config file: $CONFIG_FILE"
 echo " Account: $ICE_ACCOUNT"
+echo " Walltime: $ICE_WALLTIME"
 echo "=========================================="
 
 mkdir -p logs
 
 # Build sbatch command
 # Note: ICE might need specific partition if gpu is not default
-SBATCH_CMD="sbatch --gres=gpu:$SLURM_GPU --account=$ICE_ACCOUNT --export=NUM_GPUS=$NUM_GPUS,CONFIG_FILE=$CONFIG_FILE,RESET_PATIENCE=$RESET_PATIENCE,FRESH_TRAIN=$FRESH_TRAIN,TRAIN_SCRIPT=$TRAIN_SCRIPT"
+SBATCH_CMD="sbatch --gres=gpu:$SLURM_GPU --account=$ICE_ACCOUNT --time=$ICE_WALLTIME --export=NUM_GPUS=$NUM_GPUS,CONFIG_FILE=$CONFIG_FILE,RESET_PATIENCE=$RESET_PATIENCE,FRESH_TRAIN=$FRESH_TRAIN,TRAIN_SCRIPT=$TRAIN_SCRIPT"
 
 if [ -n "$ICE_PARTITION" ]; then
     SBATCH_CMD="$SBATCH_CMD --partition=$ICE_PARTITION"
