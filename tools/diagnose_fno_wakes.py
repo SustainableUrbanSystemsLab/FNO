@@ -8,10 +8,14 @@ Usage:
     python diagnose_fno_wakes.py --model fno_mag_weights.pth --data test_sample.csv
 """
 
+import os, sys
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import pandas as pd
+
+# Add project root to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 from scipy import ndimage
 
 

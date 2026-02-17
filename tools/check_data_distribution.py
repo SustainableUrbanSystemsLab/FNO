@@ -1,5 +1,4 @@
-
-import os
+import os, sys
 import glob
 import pandas as pd
 import numpy as np
@@ -8,8 +7,11 @@ from tqdm import tqdm
 import torch
 import collections
 
+# Add project root to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
+
 # Import logic from codebase to match training exactly
-from gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
+from core.utils.gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
 
 def get_stats_for_file(fp):
     try:

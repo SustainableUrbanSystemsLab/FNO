@@ -1,12 +1,16 @@
 # Train FNO to predict dimensionless magnitude (mag_U)
-import os, glob, numpy as np, pandas as pd, torch
+import os, glob, numpy as np, pandas as pd, torch, sys
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 from torch.utils.data import DataLoader, TensorDataset
-from fno2d_model import FNO2d, sensor_weighted_mse
-from gh_to_fno import build_input_tensor_from_gh
+
+# Add project root to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+
+from core.models.fno2d import FNO2d, sensor_weighted_mse
+from core.utils.gh_to_fno import build_input_tensor_from_gh
 
 # ============ Load Configuration ============
 CONFIG_FILE = "config.toml"
@@ -15,7 +19,7 @@ def load_config():
     """Load configuration from config.toml file."""
     import tomllib  # Python 3.11+ built-in
     
-    config_path = os.path.join(os.path.dirname(__file__), CONFIG_FILE)
+    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../', CONFIG_FILE))
     if os.path.exists(config_path):
         with open(config_path, 'rb') as f:
             return tomllib.load(f)
@@ -72,7 +76,7 @@ RANK, WORLD_SIZE, LOCAL_RANK, IS_DISTRIBUTED = setup_distributed()
 DEVICE = f"cuda:{LOCAL_RANK}" if torch.cuda.is_available() else "cpu"
 
 # ============ Load Logger ============
-from training_logger import TrainingLogger
+from core.utils.training_logger import TrainingLogger
 
 # ... (Config loading remains the same until GRAD_WEIGHT) ...
 GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.15)

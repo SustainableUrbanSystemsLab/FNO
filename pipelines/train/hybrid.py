@@ -9,25 +9,19 @@ Features:
 - Multiprocessing Data Preparation
 """
 
-import os, glob, numpy as np, pandas as pd, torch, hashlib, pickle, sys, argparse, time, traceback
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader, TensorDataset
-from torch.utils.data.distributed import DistributedSampler
-from tqdm import tqdm
-from multiprocessing import Pool, cpu_count
-import tomllib
+# Add project root to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 # Local imports
-from fno_hybrid_model import HybridFNO, physics_informed_loss
-from gh_to_fno import build_input_tensor_from_gh
-from training_logger import TrainingLogger
+from core.models.hybrid import HybridFNO, physics_informed_loss
+from core.utils.gh_to_fno import build_input_tensor_from_gh
+from core.utils.training_logger import TrainingLogger
 from neuralop.losses import LpLoss, H1Loss
 
 # ============ Load Configuration ============
 def load_config(config_file):
     """Load configuration from toml file."""
-    config_path = os.path.join(os.path.dirname(__file__), config_file)
+    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../', config_file))
     if os.path.exists(config_path):
         with open(config_path, 'rb') as f:
             return tomllib.load(f)

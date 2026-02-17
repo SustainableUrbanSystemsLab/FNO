@@ -16,8 +16,8 @@ model_output = "fno_mag_weights.pth"
 [training]
 batch_size = 4
 epochs = 1000
-learning_rate = 5e-4    # Restored to 5e-4 (Production)
-patience = 100           # Increased to 100 to ensure full convergence over 12h run
+learning_rate = 1e-4    # Lowered for Hybrid stability
+patience = 100
 checkpoint_interval = 10  # Save resumable checkpoint every N epochs
 
 [model]

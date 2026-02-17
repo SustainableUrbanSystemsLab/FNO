@@ -9,9 +9,13 @@ from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
-from fno2d_model import FNO2d, sensor_weighted_mse
-from gh_to_fno import build_input_tensor_from_gh
-from training_logger import TrainingLogger
+
+# Add project root to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+
+from core.models.fno2d import FNO2d, sensor_weighted_mse
+from core.utils.gh_to_fno import build_input_tensor_from_gh
+from core.utils.training_logger import TrainingLogger
 
 # ============ Load Configuration ============
 import argparse
@@ -26,7 +30,7 @@ def load_config():
     """Load configuration from config.toml file."""
     import tomllib  # Python 3.11+ built-in
     
-    config_path = os.path.join(os.path.dirname(__file__), CONFIG_FILE)
+    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../', CONFIG_FILE))
     if os.path.exists(config_path):
         with open(config_path, 'rb') as f:
             return tomllib.load(f)
@@ -603,7 +607,7 @@ def main():
             
             # Generate publication-ready plots
             try:
-                from generate_plots import generate_publication_plots
+                from core.utils.generate_plots import generate_publication_plots
                 generate_publication_plots(logger.metrics_csv)
             except Exception as e:
                 print(f"[Plots] Could not generate plots: {e}")

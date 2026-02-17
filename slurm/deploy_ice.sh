@@ -10,7 +10,7 @@ NUM_GPUS=2
 CONFIG_FILE="config.toml"
 RESET_PATIENCE=""
 FRESH_TRAIN=""
-TRAIN_SCRIPT="train_fno_distributed.py"
+TRAIN_SCRIPT="pipelines/train/distributed.py"
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do

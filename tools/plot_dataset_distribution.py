@@ -1,4 +1,4 @@
-import os
+import os, sys
 import glob
 import numpy as np
 import pandas as pd
@@ -7,8 +7,11 @@ from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
 import torch
 
+# Add project root to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
+
 # Import the EXACT normalization logic used in training
-from gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
+from core.utils.gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
 
 # Configuration
 # ----------------

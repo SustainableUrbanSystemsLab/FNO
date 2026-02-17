@@ -1,11 +1,15 @@
-import os
+import os, sys
 import glob
 import torch
 import numpy as np
 import pandas as pd
 from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
-from gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
+
+# Add project root to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
+
+from core.utils.gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
 
 def get_tensor_for_file(fp):
     try:

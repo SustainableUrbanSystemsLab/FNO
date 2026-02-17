@@ -1,20 +1,20 @@
-import os
-import glob
-import torch
-import numpy as np
-import pandas as pd
+import os, glob, torch, numpy as np, pandas as pd, sys
 from tqdm import tqdm
 
-from gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
-from fno2d_model import FNO2d
+# Add project root to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+
+from core.utils.gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
+from core.models.fno2d import FNO2d
 
 # ================= CONFIG =================
 CONFIG_FILE = "config_wake_focused.toml"
 
 def load_config():
     import tomllib  # Python 3.11+
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "rb") as f:
+    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../', CONFIG_FILE))
+    if os.path.exists(config_path):
+        with open(config_path, "rb") as f:
             return tomllib.load(f)
     return {}
 
