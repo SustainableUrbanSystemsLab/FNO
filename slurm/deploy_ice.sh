@@ -41,10 +41,16 @@ esac
 
 # Read ICE config from config.toml
 if [ -f "$CONFIG_FILE" ]; then
-    # Look for [ice] section first
-    ICE_ACCOUNT=$(sed -n '/^\[ice\]/,/^\[/p' "$CONFIG_FILE" | grep -E "^account\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
-    ICE_PARTITION=$(sed -n '/^\[ice\]/,/^\[/p' "$CONFIG_FILE" | grep -E "^partition\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
-    ICE_WALLTIME=$(sed -n '/^\[ice\]/,/^\[/p' "$CONFIG_FILE" | grep -E "^walltime\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
+    # Look for [ice] section
+    # This logic extracts the [ice] section whether it's in the middle or at the end of the file
+    ICE_SECTION=$(sed -n '/^\[ice\]/,/^\s*\[/p' "$CONFIG_FILE")
+    if [ -z "$ICE_SECTION" ]; then
+        ICE_SECTION=$(sed -n '/^\[ice\]/,$p' "$CONFIG_FILE")
+    fi
+
+    ICE_ACCOUNT=$(echo "$ICE_SECTION" | grep -E "^\s*account\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
+    ICE_PARTITION=$(echo "$ICE_SECTION" | grep -E "^\s*partition\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
+    ICE_WALLTIME=$(echo "$ICE_SECTION" | grep -E "^\s*walltime\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
 else
     echo "Warning: $CONFIG_FILE not found."
     ICE_ACCOUNT="coc" # Default fallback
