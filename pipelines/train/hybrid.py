@@ -8,6 +8,13 @@ Features:
 - Slurm/ICE Cluster Integration
 - Multiprocessing Data Preparation
 """
+import os, sys, torch, numpy as np, pandas as pd, tomllib, argparse, glob, hashlib, pickle, traceback, time
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import DataLoader, TensorDataset
+from multiprocessing import Pool, cpu_count
+from tqdm import tqdm
 
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
@@ -210,6 +217,12 @@ def main():
         SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
         PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0)
         WAKE_WEIGHT = config.get('loss', {}).get('wake_weight', 0.0)
+        CHECKPOINT_INTERVAL = config.get('training', {}).get('checkpoint_interval', 10)
+        EPOCHS_DIR = "epochs"
+
+        if is_main_process(rank):
+            os.makedirs(EPOCHS_DIR, exist_ok=True)
+            os.makedirs("training_logs", exist_ok=True)
 
         # 3. Data Prep (Hybrid Lazy Loading)
         x_npy = os.path.join(DATA_FOLDER, "X.npy")
@@ -250,6 +263,9 @@ def main():
         if is_distributed: model = DDP(model, device_ids=[local_rank])
         
         opt = torch.optim.AdamW(model.parameters(), lr=LR)
+        # Add scheduler for consistency with standard training
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
+        
         l2_loss = LpLoss(d=2, p=2); h1_loss = H1Loss(d=2)
         if is_main_process(rank): logger = TrainingLogger(output_dir="training_logs")
         
@@ -279,6 +295,7 @@ def main():
                 dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
                 running_loss = loss_tensor.item()
             
+            scheduler.step()
             avg_loss = running_loss / len(dataset)
             if is_main_process(rank):
                 print(f"Epoch {epoch}/{EPOCHS} Loss: {avg_loss:.6e}", flush=True)
@@ -286,6 +303,11 @@ def main():
                     best_loss = avg_loss
                     torch.save(model.module.state_dict() if is_distributed else model.state_dict(), MODEL_OUT)
                     print(f"   * Best model saved (Loss: {best_loss:.6e})", flush=True)
+
+                if epoch % CHECKPOINT_INTERVAL == 0:
+                    ckpt_path = os.path.join(EPOCHS_DIR, f"hybrid_epoch_{epoch}.pth")
+                    torch.save(model.module.state_dict() if is_distributed else model.state_dict(), ckpt_path)
+                    print(f"  > Periodic checkpoint saved: {ckpt_path}", flush=True)
 
     except Exception as e:
         print(f"CRITICAL ERROR on Rank {rank}: {e}", file=sys.stderr, flush=True)

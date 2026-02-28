@@ -62,8 +62,11 @@ else:
         print(f"Warning: Neither ICE nor Linux paths found. Defaulting to: {DATA_FOLDER}")
 
 MODEL_OUT = config.get('paths', {}).get('model_output', 'fno_mag_weights.pth')
-CHECKPOINT_PATH = config.get('paths', {}).get('checkpoint_file', 'checkpoint_latest.pth')
+CHECKPOINT_PATH = config.get('paths', {}).get('checkpoint_file', 'epochs/checkpoint_latest.pth')
 CACHE_FILE = "dataset_cache_neuralop.pkl"
+EPOCHS_DIR = "epochs"
+if is_main_process(rank):
+    os.makedirs(EPOCHS_DIR, exist_ok=True)
 BATCH = config.get('training', {}).get('batch_size', 4)
 EPOCHS = config.get('training', {}).get('epochs', 200)
 LR = config.get('training', {}).get('learning_rate', 1e-3)
@@ -551,7 +554,12 @@ def main():
                     'patience_counter': patience_counter,
                 }
                 torch.save(checkpoint, CHECKPOINT_PATH)
-                print(f"  > Checkpoint saved to {CHECKPOINT_PATH}")
+                print(f"  > Latest checkpoint saved to {CHECKPOINT_PATH}")
+                
+                # Also save epoch-specific checkpoint for safety
+                epoch_ckpt = os.path.join(EPOCHS_DIR, f"checkpoint_epoch_{epoch}.pth")
+                torch.save(checkpoint, epoch_ckpt)
+                print(f"  > Epoch checkpoint saved to {epoch_ckpt}")
 
             # Early stopping
             # CRITICAL FIX: All ranks must track patience and decide to stop together.
