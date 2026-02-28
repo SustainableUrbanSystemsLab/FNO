@@ -67,26 +67,3 @@ class HybridFNO(nn.Module):
         
         out = self.refinement(combined)
         return out
-
-def physics_informed_loss(pred, target, inputs, device, div_weight=0.1):
-    """
-    A sample Physics-Informed loss component.
-    Calculates the divergence (∇·u) of the predicted wind field.
-    Note: For a 2D slice, we approximate mass conservation.
-    """
-    # Assuming pred is delta velocity magnitude or components
-    # If pred is magnitude, we need components to compute divergence accurately.
-    # For this sample, we'll demonstrate the structure for a 2D divergence check.
-    
-    # Calculate gradients of the prediction
-    # In a full PINN, we'd have Ux, Uy as outputs.
-    # Here, let's assume 'pred' is a scalar field We.
-    
-    dy = pred[:, :, 1:, :] - pred[:, :, :-1, :]
-    dx = pred[:, :, :, 1:] - pred[:, :, :, :-1]
-    
-    # Placeholder for residual: sum of squared gradients where it should be smooth
-    # In Navier-Stokes, this would be the residual of the conservation eq.
-    continuity_residual = (torch.mean(dx**2) + torch.mean(dy**2))
-    
-    return div_weight * continuity_residual

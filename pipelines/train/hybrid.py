@@ -13,7 +13,8 @@ Features:
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 # Local imports
-from core.models.hybrid import HybridFNO, physics_informed_loss
+from core.models.fno2d import FNO2d, sensor_weighted_mse
+from core.models.hybrid import HybridFNO
 from core.utils.gh_to_fno import build_input_tensor_from_gh
 from core.utils.training_logger import TrainingLogger
 from neuralop.losses import LpLoss, H1Loss
@@ -200,9 +201,15 @@ def main():
         BATCH = config.get('training', {}).get('batch_size', 4)
         EPOCHS = config.get('training', {}).get('epochs', 1000)
         LR = config.get('training', {}).get('learning_rate', 5e-4)
+
+        MODES1 = config.get('model', {}).get('modes1', 32)
+        MODES2 = config.get('model', {}).get('modes2', 32)
+        WIDTH = config.get('model', {}).get('width', 64)
         
-        if is_main_process(rank):
-            print(f"[Diag] Configured: Epochs={EPOCHS}, Batch={BATCH}, LR={LR}", flush=True)
+        GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.15)
+        SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
+        PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0)
+        WAKE_WEIGHT = config.get('loss', {}).get('wake_weight', 0.0)
 
         # 3. Data Prep (Hybrid Lazy Loading)
         x_npy = os.path.join(DATA_FOLDER, "X.npy")
@@ -232,7 +239,9 @@ def main():
 
         # 4. Model & Optimization
         sample_x, _, _ = dataset[0]
-        model = HybridFNO(in_channels=sample_x.shape[0], hidden_channels=64).to(device)
+        model = HybridFNO(in_channels=sample_x.shape[0], 
+                          n_modes=(MODES1, MODES2),
+                          hidden_channels=WIDTH).to(device)
         
         if os.path.exists(MODEL_OUT) and not args.fresh:
             if is_main_process(rank): print(f"Resuming weights: {MODEL_OUT}", flush=True)
@@ -252,10 +261,16 @@ def main():
             for xb, yb, mb in loader:
                 xb, yb, mb = xb.to(device), yb.to(device), mb.to(device)
                 pred = model(xb)
-                loss_data = l2_loss(pred * mb, yb * mb)
-                loss_grad = h1_loss(pred * mb, yb * mb)
-                loss_phys = physics_informed_loss(pred, yb, xb, device)
-                loss = loss_data + 0.3 * loss_grad + 0.1 * loss_phys
+                
+                loss, components = sensor_weighted_mse(
+                    pred, yb, sensor_mask=mb,
+                    grad_weight=GRAD_WEIGHT,
+                    spectral_weight=SPECTRAL_WEIGHT,
+                    peak_weight=PEAK_WEIGHT,
+                    wake_weight=WAKE_WEIGHT,
+                    return_components=True
+                )
+                
                 opt.zero_grad(); loss.backward(); opt.step()
                 running_loss += loss.item() * xb.shape[0]
 

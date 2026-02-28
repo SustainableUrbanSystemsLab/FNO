@@ -56,7 +56,13 @@ for CSV in tqdm(files, desc="Hybrid Inference"):
 
         if model is None:
             # Init Hybrid Model (Must match training params)
-            model = HybridFNO(in_channels=X.shape[1], hidden_channels=64).to(DEVICE)
+            MODES1 = config.get('model', {}).get('modes1', 32)
+            MODES2 = config.get('model', {}).get('modes2', 32)
+            WIDTH = config.get('model', {}).get('width', 64)
+            
+            model = HybridFNO(in_channels=X.shape[1], 
+                              n_modes=(MODES1, MODES2),
+                              hidden_channels=WIDTH).to(DEVICE)
             state_dict = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
             
             # Remove DDP prefix if present and ignore _metadata
