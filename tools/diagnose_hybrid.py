@@ -14,6 +14,11 @@ def run_diagnostics(model_path, data_path, output_name="hybrid_diagnostic.png"):
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     
     # 1. Load Data
+    if not os.path.exists(data_path):
+        print(f"Error: Data file not found at {data_path}")
+        print("Please provide a valid CSV file from your test_csv folder.")
+        return
+
     df = pd.read_csv(data_path)
     df.rename(columns={"X": "X_coords", "Y": "Y_coords", "x": "X_coords", "y": "Y_coords", "U_at_z": "U_over_Uref"}, inplace=True)
     
@@ -92,9 +97,16 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if not os.path.exists(args.model):
-        # try FNO/weights/...
-        alt_path = os.path.join("FNO", args.model)
-        if os.path.exists(alt_path):
-            args.model = alt_path
+        # 1. Try stripping 'weights/' if it was provided but file is in root
+        if args.model.startswith("weights/"):
+            alt_root = args.model.replace("weights/", "")
+            if os.path.exists(alt_root):
+                args.model = alt_root
+        
+        # 2. Try adding 'FNO/' if running from outside
+        if not os.path.exists(args.model):
+            alt_fno = os.path.join("FNO", args.model)
+            if os.path.exists(alt_fno):
+                args.model = alt_fno
             
     run_diagnostics(args.model, args.data, args.output)
