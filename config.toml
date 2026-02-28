@@ -44,10 +44,10 @@ account = "gts-pkastner3"
 # Partition (leave empty for default)
 partition = ""
 # Walltime for the job (HH:MM:SS)
-walltime = "00:10:00"
+walltime = "04:00:00"
 
 [ice]
 # ICE cluster configuration
 account = "coc"
 partition = "" # Optional, add if needed
-walltime = "00:10:00"
+walltime = "04:00:00"
