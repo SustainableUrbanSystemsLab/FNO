@@ -21,16 +21,17 @@ patience = 100
 checkpoint_interval = 10  # Save resumable checkpoint every N epochs
 
 [model]
-modes1 = 48  # Increased from 32 for sharper predictions
-modes2 = 48  # Increased from 32 for sharper predictions
+modes1 = 48  # High capacity for sharper wakes
+modes2 = 48  
 width = 96
 n_layers = 5
 
 [loss]
 # Loss function weights (MSE is always 1.0)
-gradient_weight = 0.15  # Restored/Standard (0.1-0.2)
-spectral_weight = 0.50  # Increased to 0.5 for sharpness
-peak_weight = 2.0       # Increased to 2.0 for L1 Peak Loss
+gradient_weight = 1.5   # Increased 10x for sharpness
+spectral_weight = 0.001 # Decreased 500x to prevent over-smoothing
+peak_weight = 0.5       # Focus on velocity extremes
+wake_weight = 0.3       # Focus on low-speed wake regions
 
 [performance]
 # Number of parallel workers for data loading (0 = auto-detect)

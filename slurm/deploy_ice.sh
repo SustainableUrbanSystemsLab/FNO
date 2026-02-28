@@ -31,13 +31,16 @@ GPU_TYPE_LOWER=$(echo "$GPU_TYPE" | tr '[:upper:]' '[:lower:]')
 
 # Map to correct ICE gres names if known, otherwise pass through
 # ICE usually uses standard gres like gpu:h100:1 or gpu:a100:1
-case $GPU_TYPE_LOWER in
-    h200) SLURM_GPU="H200:${NUM_GPUS}" ;;
-    h100) SLURM_GPU="H100:${NUM_GPUS}" ;;
-    a100) SLURM_GPU="A100:${NUM_GPUS}" ;;
-    v100) SLURM_GPU="V100:${NUM_GPUS}" ;;
-    *) SLURM_GPU="${GPU_TYPE}:${NUM_GPUS}" ;;
-esac
+    h200)     SLURM_GPU="H200:${NUM_GPUS}" ;;
+    h100)     SLURM_GPU="H100:${NUM_GPUS}" ;;
+    a100)     SLURM_GPU="A100:${NUM_GPUS}" ;;
+    v100)     SLURM_GPU="V100:${NUM_GPUS}" ;;
+    l40s)     SLURM_GPU="L40S:${NUM_GPUS}" ;;
+    a40)      SLURM_GPU="A40:${NUM_GPUS}" ;;
+    rtx_6000) SLURM_GPU="rtx_6000:${NUM_GPUS}" ;;
+    mi210)    SLURM_GPU="mi210:${NUM_GPUS}" ;;
+    any)      SLURM_GPU="${NUM_GPUS}" ;; # Just 'gpu:N'
+    *)        SLURM_GPU="${GPU_TYPE}:${NUM_GPUS}" ;;
 
 # Read ICE config from config.toml
 if [ -f "$CONFIG_FILE" ]; then

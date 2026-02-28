@@ -66,35 +66,69 @@ class FNO2d(nn.Module):
         out = self.out_proj(x)
         return out
 
-def physics_loss(pred, target, mask=None, grad_weight=0.1):
-    """Combined MSE and Gradient Loss for sharpness.
-    pred, target: (B,C,H,W)
-    mask: (B,1,H,W)
-    grad_weight: importance of sharpness vs magnitude
-    """
-    # 1. Main Weighted MSE
-    m = mask if mask is not None else torch.ones_like(pred)
-    mse = ((pred - target)**2 * m).sum() / (m.sum() + 1e-8)
-    
-    # 2. Gradient Sharpness (Sobel-like)
-    # Penalize the 'blurry' edges
-    def get_grads(x):
-        # x is (B,C,H,W)
-        dx = x[:, :, :, 1:] - x[:, :, :, :-1]
-        dy = x[:, :, 1:, :] - x[:, :, :-1, :]
-        return dx, dy
-    
-    p_dx, p_dy = get_grads(pred)
-    t_dx, t_dy = get_grads(target)
-    
-    # Mask gradients (simple approximation for simplicity)
-    m_dx = mask[:, :, :, 1:] if mask is not None else 1.0
-    m_dy = mask[:, :, 1:, :] if mask is not None else 1.0
-    
-    grad_loss = (((p_dx - t_dx)**2 * m_dx).mean() + ((p_dy - t_dy)**2 * m_dy).mean())
-    
-    return mse + grad_weight * grad_loss
+def compute_wake_loss(y_pred, y_target, sensor_mask, wake_threshold=0.3):
+    """Compute additional loss for wake regions (low wind speed areas)."""
+    wake_mask = (y_target < wake_threshold).float()
+    wake_error = ((y_pred - y_target) ** 2) * wake_mask * sensor_mask
+    return wake_error.sum() / (wake_mask.sum() + 1e-8)
 
-def sensor_weighted_mse(pred, target, sensor_mask=None):
-    # Backward compatibility
-    return physics_loss(pred, target, sensor_mask)
+def compute_peak_loss(y_pred, y_target, sensor_mask, percentile=90):
+    """Focus on extremes (High and Low wind speeds)."""
+    flat_target = y_target.flatten()
+    high_threshold = torch.quantile(flat_target, percentile / 100.0)
+    low_threshold = torch.quantile(flat_target, (100 - percentile) / 100.0)
+    high_mask = (y_target >= high_threshold).float()
+    low_mask = (y_target <= low_threshold).float()
+    extreme_mask = torch.maximum(high_mask, low_mask)
+    extreme_error = ((y_pred - y_target) ** 2) * extreme_mask * sensor_mask
+    return extreme_error.sum() / (extreme_mask.sum() + 1e-8)
+
+def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
+                        grad_weight=0.0, spectral_weight=0.0, 
+                        peak_weight=0.0, wake_weight=0.0,
+                        return_components=False):
+    """Multi-component loss for FNO training."""
+    if sensor_mask is None:
+        sensor_mask = torch.ones_like(y_pred)
+    
+    mse_loss = (sensor_mask * (y_pred - y_target) ** 2).sum() / (sensor_mask.sum() + 1e-8)
+    
+    gradient_loss = torch.tensor(0.0, device=y_pred.device)
+    if grad_weight > 0:
+        p_dx = y_pred[:, :, :, 1:] - y_pred[:, :, :, :-1]
+        p_dy = y_pred[:, :, 1:, :] - y_pred[:, :, :-1, :]
+        t_dx = y_target[:, :, :, 1:] - y_target[:, :, :, :-1]
+        t_dy = y_target[:, :, 1:, :] - y_target[:, :, :-1, :]
+        m_dx = sensor_mask[:, :, :, 1:]
+        m_dy = sensor_mask[:, :, 1:, :]
+        gradient_loss = ((p_dx - t_dx)**2 * m_dx).mean() + ((p_dy - t_dy)**2 * m_dy).mean()
+    
+    spectral_loss = torch.tensor(0.0, device=y_pred.device)
+    if spectral_weight > 0:
+        pred_fft = torch.fft.rfft2(y_pred, norm='ortho')
+        tgt_fft = torch.fft.rfft2(y_target, norm='ortho')
+        spectral_loss = torch.mean(torch.abs(pred_fft - tgt_fft) ** 2)
+    
+    peak_loss = torch.tensor(0.0, device=y_pred.device)
+    if peak_weight > 0:
+        peak_loss = compute_peak_loss(y_pred, y_target, sensor_mask)
+    
+    wake_loss = torch.tensor(0.0, device=y_pred.device)
+    if wake_weight > 0:
+        wake_loss = compute_wake_loss(y_pred, y_target, sensor_mask)
+    
+    total_loss = (mse_loss + 
+                  grad_weight * gradient_loss + 
+                  spectral_weight * spectral_loss + 
+                  peak_weight * peak_loss +
+                  wake_weight * wake_loss)
+    
+    if return_components:
+        return total_loss, {
+            'mse_loss': mse_loss.item(),
+            'gradient_loss': gradient_loss.item(),
+            'spectral_loss': spectral_loss.item(),
+            'peak_loss': peak_loss.item(),
+            'wake_loss': wake_loss.item(),
+        }
+    return total_loss

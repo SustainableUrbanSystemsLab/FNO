@@ -81,7 +81,8 @@ from core.utils.training_logger import TrainingLogger
 # ... (Config loading remains the same until GRAD_WEIGHT) ...
 GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.15)
 SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
-PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0) # Load peak weight
+PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0) 
+WAKE_WEIGHT = config.get('loss', {}).get('wake_weight', 0.0)
 
 FORCE_H = None; FORCE_W = None
 
@@ -425,6 +426,7 @@ for epoch in range(start_epoch, EPOCHS+1):
                                              grad_weight=GRAD_WEIGHT, 
                                              spectral_weight=SPECTRAL_WEIGHT, 
                                              peak_weight=PEAK_WEIGHT,
+                                             wake_weight=WAKE_WEIGHT,
                                              return_components=True)
                                              
         opt.zero_grad(); loss.backward(); opt.step()
@@ -505,6 +507,7 @@ for epoch in range(start_epoch, EPOCHS+1):
         'gradient_loss': avg_components['gradient_loss'],
         'spectral_loss': avg_components['spectral_loss'],
         'peak_loss': avg_components['peak_loss'],
+        'wake_loss': avg_components.get('wake_loss', 0.0),
         'learning_rate': opt.param_groups[0]['lr'],
         'epoch_time_sec': epoch_time,
         'best_loss': best_loss, 
