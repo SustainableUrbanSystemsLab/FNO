@@ -8,7 +8,7 @@ from core.utils.gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coo
 from core.models.fno2d import FNO2d
 
 # ================= CONFIG =================
-CONFIG_FILE = "config_wake_focused.toml"
+CONFIG_FILE = "config.toml"
 
 def load_config():
     import tomllib  # Python 3.11+
@@ -16,13 +16,14 @@ def load_config():
     if os.path.exists(config_path):
         with open(config_path, "rb") as f:
             return tomllib.load(f)
+    print(f"Warning: {CONFIG_FILE} not found, using defaults")
     return {}
 
 config = load_config()
 
 # --- Model architecture (MUST match training) ---
-MODES1   = config.get("model", {}).get("modes1", 64)
-MODES2   = config.get("model", {}).get("modes2", 64)
+MODES1   = config.get("model", {}).get("modes1", 48)
+MODES2   = config.get("model", {}).get("modes2", 48)
 WIDTH    = config.get("model", {}).get("width", 96)
 N_LAYERS = config.get("model", {}).get("n_layers", 5)
 
