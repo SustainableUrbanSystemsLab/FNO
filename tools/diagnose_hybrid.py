@@ -1,4 +1,4 @@
-import os, sys, torch, numpy as np, pandas as pd, matplotlib.pyplot as plt
+import os, sys, torch, numpy as np, pandas as pd, matplotlib.pyplot as plt, tomllib
 from tqdm import tqdm
 
 # Add project root to sys.path
@@ -7,6 +7,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 from core.models.hybrid import HybridFNO
 from core.utils.gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
 from tools.diagnose_fno_wakes import analyze_prediction_quality, create_diagnostic_plot
+
+def load_config():
+    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../config.toml'))
+    if os.path.exists(config_path):
+        with open(config_path, "rb") as f:
+            return tomllib.load(f)
+    return {}
 
 def run_diagnostics(model_path, data_path, output_name="hybrid_diagnostic.png"):
     print(f"--- Hybrid Model Diagnostic: {os.path.basename(model_path)} ---")
@@ -38,8 +45,19 @@ def run_diagnostics(model_path, data_path, output_name="hybrid_diagnostic.png"):
     X, _ = build_input_tensor_from_gh(gh, device=DEVICE)
     
     # 2. Load Model
+    config = load_config()
+    MODES1 = config.get("model", {}).get("modes1", 32)
+    MODES2 = config.get("model", {}).get("modes2", 32)
+    WIDTH = config.get("model", {}).get("width", 64)
+    N_LAYERS = config.get("model", {}).get("n_layers", 4)
+    
     # Architecture params must match training
-    model = HybridFNO(in_channels=X.shape[1], hidden_channels=64).to(DEVICE)
+    model = HybridFNO(
+        in_channels=X.shape[1], 
+        n_modes=(MODES1, MODES2), 
+        hidden_channels=WIDTH,
+        n_layers=N_LAYERS
+    ).to(DEVICE)
     checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=False)
     
     # Handle DDP and legacy formats
