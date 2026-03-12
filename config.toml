@@ -28,10 +28,10 @@ n_layers = 5
 
 [loss]
 # Loss function weights (MSE is always 1.0)
-gradient_weight = 1.5   # Increased 10x for sharpness
-spectral_weight = 0.001 # Decreased 500x to prevent over-smoothing
-peak_weight = 0.5       # Focus on velocity extremes
-wake_weight = 0.3       # Focus on low-speed wake regions
+gradient_weight = 2.0   # High for sharpness
+spectral_weight = 0.01  # Increased slightly to help FNO converge
+peak_weight = 0.5
+wake_weight = 1.0       # High priority for wake capture
 
 [performance]
 # Number of parallel workers for data loading (0 = auto-detect)

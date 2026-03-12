@@ -47,14 +47,21 @@ class HybridFNO(nn.Module):
         
         # 3. Final refinement layers (Geometry-Aware)
         self.refinement = nn.Sequential(
-            nn.Conv2d(hidden_channels + 1, hidden_channels, kernel_size=3, padding=1), # +1 for SDF skip
-            nn.ReLU(),
-            nn.Conv2d(hidden_channels, out_channels, kernel_size=1)
+            nn.Conv2d(hidden_channels + 2, hidden_channels, kernel_size=3, padding=1), # +2 for SDF and Baseline skip
+            nn.SiLU(),
+            nn.Conv2d(hidden_channels, hidden_channels // 2, kernel_size=3, padding=1),
+            nn.SiLU(),
+            nn.Conv2d(hidden_channels // 2, out_channels, kernel_size=1)
         )
+        
+        # Initialize last layer to near-zero so it starts by predicting the baseline
+        nn.init.constant_(self.refinement[-1].weight, 0)
+        nn.init.constant_(self.refinement[-1].bias, 0)
 
     def forward(self, x):
-        # Assume x has 8 channels, where channel 0 is SDF
+        # x channels: [SDF, Bldg_height, Z_relative, U_over_Uref, X_local, Y_local, dir_sin, dir_cos]
         sdf = x[:, 0:1, :, :] 
+        baseline = x[:, 3:4, :, :]
         
         # Spectral pass
         feat = self.fno(x)
@@ -62,8 +69,10 @@ class HybridFNO(nn.Module):
         # Attention pass
         feat = self.attention(feat)
         
-        # Concatenate SDF for geometry conditioning in the final stage
-        combined = torch.cat([feat, sdf], dim=1)
+        # Concatenate SDF and Baseline for geometry conditioning
+        combined = torch.cat([feat, sdf, baseline], dim=1)
         
-        out = self.refinement(combined)
-        return out
+        # The model predicts the correction (delta_u)
+        delta = self.refinement(combined)
+        
+        return delta
