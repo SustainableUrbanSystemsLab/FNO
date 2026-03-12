@@ -33,6 +33,10 @@ spectral_weight = 0.01  # Increased slightly to help FNO converge
 peak_weight = 0.5
 wake_weight = 1.0       # High priority for wake capture
 
+# PINN-specific physics constraints
+continuity_weight = 0.1   # Penalize non-divergence-free predictions (∇·u ≈ 0)
+momentum_weight = 0.05    # Penalize physically implausible sharp spikes (ν∇²u)
+
 [performance]
 # Number of parallel workers for data loading (0 = auto-detect)
 num_workers = 0
