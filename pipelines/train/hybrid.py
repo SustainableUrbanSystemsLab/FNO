@@ -284,6 +284,7 @@ def main():
                     spectral_weight=SPECTRAL_WEIGHT,
                     peak_weight=PEAK_WEIGHT,
                     wake_weight=WAKE_WEIGHT,
+                    wake_threshold=-0.5, # Target deep deficits in delta-u space
                     return_components=True
                 )
                 

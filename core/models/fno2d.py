@@ -86,6 +86,7 @@ def compute_peak_loss(y_pred, y_target, sensor_mask, percentile=90):
 def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
                         grad_weight=0.0, spectral_weight=0.0, 
                         peak_weight=0.0, wake_weight=0.0,
+                        wake_threshold=0.3,
                         return_components=False):
     """Multi-component loss for FNO training."""
     if sensor_mask is None:
@@ -115,7 +116,7 @@ def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
     
     wake_loss = torch.tensor(0.0, device=y_pred.device)
     if wake_weight > 0:
-        wake_loss = compute_wake_loss(y_pred, y_target, sensor_mask)
+        wake_loss = compute_wake_loss(y_pred, y_target, sensor_mask, wake_threshold=wake_threshold)
     
     total_loss = (mse_loss + 
                   grad_weight * gradient_loss + 
