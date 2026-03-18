@@ -66,6 +66,24 @@ def infer_grid(xs, ys, tol=1e-6):
 
 def process_single_file(fp):
     try:
+        if fp.endswith(".npz"):
+            with np.load(fp) as data:
+                X = torch.from_numpy(data['X']).float()
+                Y = torch.from_numpy(data['Y']).float()
+                # Use default mask if not provided
+                if 'mask' in data:
+                    mask = torch.from_numpy(data['mask']).float()
+                elif 'Mask' in data:
+                    mask = torch.from_numpy(data['Mask']).float()
+                else:
+                    mask = torch.ones_like(Y)
+                chs = data.get('channel_names', None)
+                # Ensure shapes match [C, H, W]
+                if X.ndim == 4: X = X.squeeze(0)
+                if Y.ndim == 4: Y = Y.squeeze(0)
+                if mask.ndim == 4: mask = mask.squeeze(0)
+                return (X, Y, mask, chs), None
+
         df = pd.read_csv(fp)
         rename_map = {'X': 'X_coords', 'Y': 'Y_coords', 'x': 'X_coords', 'y': 'Y_coords'}
         df.rename(columns=rename_map, inplace=True)
@@ -235,11 +253,12 @@ def main():
             sdf_max = temp_x[0, 0].max()
             sdf_scaling = 200.0 if sdf_max <= 5.0 else 1.0
             dataset = HybridNumpyDataset(x_npy, y_npy, sdf_scaling)
-        else:
             if is_main_process(rank):
-                print(f"Falling back to CSV loading (Memory Intensive)...", flush=True)
+                print(f"Falling back to CSV/NPZ loading (Memory Intensive)...", flush=True)
             files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.csv"), recursive=True))
-            if not files: raise RuntimeError(f"No Data found in {DATA_FOLDER}")
+            if not files:
+                files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.npz"), recursive=True))
+            if not files: raise RuntimeError(f"No CSV or NPZ data found in {DATA_FOLDER}")
             num_workers = max(1, cpu_count() // 2)
             Xs, Ys, Masks, _ = load_or_prepare_dataset(files, rank, is_main_process(rank), num_workers)
             max_h = max(t.shape[1] for t in Xs); max_w = max(t.shape[2] for t in Xs)

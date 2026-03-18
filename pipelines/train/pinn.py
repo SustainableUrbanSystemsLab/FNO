@@ -64,11 +64,25 @@ class PINNNumpyDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         x = torch.from_numpy(self.X[idx].copy()).float()
         y = torch.from_numpy(self.Y[idx].copy()).float()
-
-        # Build sensor mask from SDF channel (channel 0)
         sdf_meters = x[0:1, :, :] * self.sdf_scaling
         mask = 1.0 + 19.0 * torch.exp(-torch.clamp(sdf_meters, min=0.0) / 5.0)
         return x, y, mask
+
+class PINNNPZDataset(torch.utils.data.Dataset):
+    """Dataset for a list of .npz files."""
+    def __init__(self, files, sdf_scaling=200.0):
+        self.files = files
+        self.sdf_scaling = sdf_scaling
+    def __len__(self): return len(self.files)
+    def __getitem__(self, idx):
+        with np.load(self.files[idx]) as data:
+            x = torch.from_numpy(data['X']).float()
+            y = torch.from_numpy(data['Y']).float()
+            if x.ndim == 4: x = x.squeeze(0)
+            if y.ndim == 4: y = y.squeeze(0)
+            sdf_meters = x[0:1, :, :] * self.sdf_scaling
+            mask = 1.0 + 19.0 * torch.exp(-torch.clamp(sdf_meters, min=0.0) / 5.0)
+            return x, y, mask
 
 
 # ============ Main ============
@@ -134,13 +148,22 @@ def main():
         x_npy = os.path.join(DATA_FOLDER, 'X.npy')
         y_npy = os.path.join(DATA_FOLDER, 'Y.npy')
 
-        if not os.path.exists(x_npy):
-            raise RuntimeError(f"X.npy not found in {DATA_FOLDER}. Please use the npy dataset.")
-
-        temp_x   = np.load(x_npy, mmap_mode='r')
-        sdf_max  = float(temp_x[0, 0].max())
-        sdf_scale = 200.0 if sdf_max <= 5.0 else 1.0
-        dataset  = PINNNumpyDataset(x_npy, y_npy, sdf_scale)
+        if os.path.exists(x_npy) and os.path.exists(y_npy):
+            if is_main(rank): print(f"Loading via PINNNumpyDataset (mmap)...", flush=True)
+            temp_x   = np.load(x_npy, mmap_mode='r')
+            sdf_max  = float(temp_x[0, 0].max())
+            sdf_scale = 200.0 if sdf_max <= 5.0 else 1.0
+            dataset  = PINNNumpyDataset(x_npy, y_npy, sdf_scale)
+        else:
+            npz_files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.npz"), recursive=True))
+            if not npz_files:
+                raise RuntimeError(f"No .npy or .npz data found in {DATA_FOLDER}")
+            if is_main(rank): print(f"Loading {len(npz_files)} .npz files...", flush=True)
+            # Sample one to get scaling
+            with np.load(npz_files[0]) as data:
+                sdf_max = float(data['X'][0, 0].max())
+            sdf_scale = 200.0 if sdf_max <= 5.0 else 1.0
+            dataset = PINNNPZDataset(npz_files, sdf_scale)
 
         if is_main(rank):
             print(f"Dataset size: {len(dataset)} samples", flush=True)
