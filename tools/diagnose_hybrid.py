@@ -104,13 +104,32 @@ def run_diagnostics(model_path, data_path, output_name="hybrid_diagnostic.png"):
         
     # 4. Analyze & Plot
     metrics = analyze_prediction_quality(pred_grid, target_grid)
-    
+
+    # --- Collapse Detection ---
+    pred_std = pred_grid.std()
+    tgt_std  = target_grid.std()
+    pred_min, pred_max = pred_grid.min(), pred_grid.max()
+    print("\n--- PREDICTION RANGE CHECK ---")
+    print(f"  Target range:     [{tgt_std:.4f} std, min={target_grid.min():.3f}, max={target_grid.max():.3f}]")
+    print(f"  Prediction range: [{pred_std:.4f} std, min={pred_min:.3f}, max={pred_max:.3f}]")
+    if pred_std < 0.02:
+        print("  *** WARNING: Model is COLLAPSED — predicting nearly constant output! ***")
+        print("  *** The model needs more training epochs. Re-train with --fresh and longer walltime. ***")
+    elif pred_std < tgt_std * 0.3:
+        print("  *** WARNING: Prediction variance is very low — model is under-predicting spatial variation. ***")
+    else:
+        print("  OK: Model is producing spatially varying predictions.")
+
     print("\nHYBRID MODEL HEALTH METRICS:")
-    print(f"  Overall MAE:      {metrics['overall_mae']:.4f}")
-    print(f"  Wake MAE:         {metrics['wake_mae']:.4f} (Goal: < 0.20)")
-    print(f"  Gradient MAE:     {metrics['gradient_mae']:.4f} (Goal: < 0.04)")
+    print(f"  Overall MAE:       {metrics['overall_mae']:.4f}")
+    print(f"  Wake MAE:          {metrics['wake_mae']:.4f}  (Goal: < 0.20)")
+    print(f"  Gradient MAE:      {metrics['gradient_mae']:.4f}  (Goal: < 0.04)")
     print(f"  Freq Preservation: {metrics['freq_preservation']:.2%}")
-    
+    if pred_std < 0.02:
+        print("\n  NOTE: Metrics above are UNRELIABLE because prediction is flat.")
+        print("  A flat prediction close to the mean baseline will score well on these metrics")
+        print("  but is not capturing any wake structure.")
+
     create_diagnostic_plot(pred_grid, target_grid, sdf=sdf_grid, save_path=output_name)
     print(f"\nDiagnostic plot saved to {output_name}")
 
