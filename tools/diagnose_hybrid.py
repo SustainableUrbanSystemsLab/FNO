@@ -67,7 +67,15 @@ def run_diagnostics(model_path, data_path, output_name="hybrid_diagnostic.png"):
         state_dict = checkpoint
         
     new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items() if k != "_metadata"}
-    model.load_state_dict(new_state_dict, strict=False)
+    try:
+        model.load_state_dict(new_state_dict, strict=True)
+    except RuntimeError as e:
+        print(f"\nERROR: Architecture mismatch!")
+        print(f"The saved weights don't match the current model (modes={MODES1}, width={WIDTH}).")
+        print(f"This usually means config.toml was changed after training.")
+        print(f"\nFull error: {e}")
+        print(f"\n>>> Solution: Re-train with --fresh, or revert config.toml to match the saved weights.")
+        return
     model.eval()
     
     # 3. Inference

@@ -258,7 +258,15 @@ def main():
         
         if os.path.exists(MODEL_OUT) and not args.fresh:
             if is_main_process(rank): print(f"Resuming weights: {MODEL_OUT}", flush=True)
-            model.load_state_dict(torch.load(MODEL_OUT, map_location=device, weights_only=False), strict=False)
+            try:
+                saved = torch.load(MODEL_OUT, map_location=device, weights_only=False)
+                result = model.load_state_dict(saved, strict=True)
+                if is_main_process(rank): print("  Weights loaded successfully (strict=True)", flush=True)
+            except RuntimeError as e:
+                if is_main_process(rank):
+                    print(f"  WARNING: Weight mismatch detected — starting FRESH (use --fresh to suppress this).", flush=True)
+                    print(f"  Reason: {e}", file=sys.stderr, flush=True)
+                # Architecture changed: don't load incompatible weights at all
 
         if is_distributed: model = DDP(model, device_ids=[local_rank])
         

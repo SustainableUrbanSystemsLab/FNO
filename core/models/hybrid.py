@@ -54,9 +54,13 @@ class HybridFNO(nn.Module):
             nn.Conv2d(hidden_channels // 2, out_channels, kernel_size=1)
         )
         
-        # Initialize last layer to near-zero so it starts by predicting the baseline
-        nn.init.constant_(self.refinement[-1].weight, 0)
-        nn.init.constant_(self.refinement[-1].bias, 0)
+        # Use Xavier init for fast learning from epoch 1
+        # (zero-init caused model to permanently output 0)
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
 
     def forward(self, x):
         # x channels: [SDF, Bldg_height, Z_relative, U_over_Uref, X_local, Y_local, dir_sin, dir_cos]

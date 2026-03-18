@@ -21,10 +21,10 @@ patience = 100
 checkpoint_interval = 10  # Save resumable checkpoint every N epochs
 
 [model]
-modes1 = 48  # High capacity for sharper wakes
-modes2 = 48  
-width = 96
-n_layers = 5
+modes1 = 32  # Reduced for faster convergence (was 48)
+modes2 = 32
+width = 64   # Reduced for faster convergence (was 96)
+n_layers = 4
 
 [loss]
 # Loss function weights (MSE is always 1.0)
