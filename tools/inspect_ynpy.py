@@ -1,11 +1,12 @@
 """
 Inspect Y.npy to verify training target format.
-Run this on the cluster to debug flat predictions.
+Uses random sampling to handle large arrays quickly.
 
 Usage:
     uv run python tools/inspect_ynpy.py
 """
-import os, sys, numpy as np
+import os, sys
+import numpy as np
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
@@ -14,61 +15,78 @@ DATA_PATHS = [
     "./train_csv",
 ]
 
+DATA = None
 for p in DATA_PATHS:
-    x_path = os.path.join(p, "X.npy")
-    y_path = os.path.join(p, "Y.npy")
-    if os.path.exists(x_path) and os.path.exists(y_path):
+    if os.path.exists(os.path.join(p, "X.npy")) and os.path.exists(os.path.join(p, "Y.npy")):
         DATA = p
         break
-else:
-    print("ERROR: Could not find X.npy and Y.npy in known locations.")
-    sys.exit(1)
+
+if DATA is None:
+    print("ERROR: Could not find X.npy and Y.npy"); sys.exit(1)
 
 print(f"Loading from: {DATA}")
-X = np.load(x_path, mmap_mode='r')
-Y = np.load(y_path, mmap_mode='r')
+X = np.load(os.path.join(DATA, "X.npy"), mmap_mode='r')
+Y = np.load(os.path.join(DATA, "Y.npy"), mmap_mode='r')
 
-print(f"\n=== X.npy (Inputs) ===")
-print(f"  Shape:  {X.shape}  (samples, channels, H, W)")
-print(f"  Range:  [{X.min():.4f}, {X.max():.4f}]")
-print(f"  Channel 0 (SDF):          min={X[:,0].min():.3f}  max={X[:,0].max():.3f}  mean={X[:,0].mean():.3f}")
-print(f"  Channel 3 (U_over_Uref):  min={X[:,3].min():.3f}  max={X[:,3].max():.3f}  mean={X[:,3].mean():.3f}")
+N = X.shape[0]
+print(f"\n=== Shapes ===")
+print(f"  X: {X.shape}  (N, channels, H, W)")
+print(f"  Y: {Y.shape}  (N, 1, H, W)")
 
-print(f"\n=== Y.npy (Targets) ===")
-print(f"  Shape:  {Y.shape}  (samples, 1, H, W)")
-print(f"  Min:    {Y.min():.4f}")
-print(f"  Max:    {Y.max():.4f}")
-print(f"  Mean:   {Y.mean():.4f}")
-print(f"  Std:    {Y.std():.4f}")
+# Sample a small subset of samples to get stats fast
+SAMPLE_N = min(50, N)
+rng = np.random.default_rng(42)
+idx = rng.choice(N, SAMPLE_N, replace=False)
+print(f"\nComputing stats from {SAMPLE_N} random samples (fast)...")
 
-# Check format
-y_mean = float(Y.mean())
-y_min  = float(Y.min())
-y_max  = float(Y.max())
+# Load sampled data into RAM
+x_sample = np.array(X[idx])   # (50, 8, H, W)
+y_sample = np.array(Y[idx])   # (50, 1, H, W)
+
+print(f"\n=== X Channels (normalized) ===")
+ch_names = ['SDF', 'Bldg_height', 'Z_relative', 'U_over_Uref', 'X_local', 'Y_local', 'dir_sin', 'dir_cos']
+for i, name in enumerate(ch_names):
+    c = x_sample[:, i]
+    print(f"  ch{i} {name:15s}:  min={c.min():7.3f}  max={c.max():7.3f}  mean={c.mean():7.3f}  std={c.std():.3f}")
+
+print(f"\n=== Y (Training Target) ===")
+print(f"  min  = {y_sample.min():.4f}")
+print(f"  max  = {y_sample.max():.4f}")
+print(f"  mean = {y_sample.mean():.4f}")
+print(f"  std  = {y_sample.std():.4f}")
+
+y_flat = y_sample.flatten()
+y_mean = y_flat.mean()
+y_min  = y_flat.min()
+y_max  = y_flat.max()
 
 print(f"\n=== FORMAT DIAGNOSIS ===")
-if y_min >= 0 and y_max > 1.0:
-    print("  *** PROBLEM: Y looks like raw mag_U (0 to 2+), NOT delta_u! ***")
-    print("  the model is trained on mag_U but inference treats output as delta_u.")
-    print("  This WILL cause flat predictions. You need to regenerate Y.npy.")
-elif -0.1 < y_mean < 0.3 and y_min < -0.1:
-    print("  OK: Y appears to be in delta_u format (mean near 0, has negatives for wakes)")
+if y_min >= 0 and y_max > 1.5:
+    print("  *** PROBLEM: Y looks like raw mag_U (range 0 to 2+). ***")
+    print("  Expected: delta_u (range ~-1 to +5, mean near 0).")
+    print("  FIX: Y.npy needs to be regenerated with delta_u = (mag - U_ref) / U_ref")
+elif -0.3 < y_mean < 0.5 and y_min < -0.05:
+    print("  OK: Y is in delta_u format (mean near 0, negative values present).")
 else:
-    print(f"  UNCERTAIN: Mean={y_mean:.3f}, Min={y_min:.3f}, Max={y_max:.3f}")
-    print("  Expected delta_u: mean ~0, min ~-1, max ~5")
+    print(f"  UNCERTAIN: mean={y_mean:.3f}, min={y_min:.3f}, max={y_max:.3f}")
+    print("  Expected delta_u: mean ~0.0, min ~-1.0, max ~5.0")
 
-# Fraction that are wakes
-wake_frac = float((Y < -0.2).mean())
-deep_wake_frac = float((Y < -0.5).mean())
-near_zero_frac = float((np.abs(Y) < 0.05).mean())
-print(f"\n=== WAKE DISTRIBUTION ===")
-print(f"  Near-zero (|delta_u| < 0.05): {near_zero_frac:.1%}  <- This is why MSE favors flat predictions")
-print(f"  Mild wake  (delta_u < -0.20): {wake_frac:.1%}")
-print(f"  Deep wake  (delta_u < -0.50): {deep_wake_frac:.1%}")
+# Wake distribution
+near_zero   = float((np.abs(y_flat) < 0.05).mean())
+mild_wake   = float((y_flat < -0.2).mean())
+deep_wake   = float((y_flat < -0.5).mean())
+accel       = float((y_flat > 0.5).mean())
 
-if near_zero_frac > 0.6:
-    print(f"\n  *** WARNING: {near_zero_frac:.0%} of training pixels are near-zero.")
-    print(f"      MSE will drive the model to predict 0 everywhere.")
-    print(f"      wake_weight needs to be MUCH higher to counteract this.")
-    recommended_wake_weight = round(near_zero_frac / (wake_frac + 1e-6), 1)
-    print(f"      Recommended wake_weight >= {recommended_wake_weight:.1f}")
+print(f"\n=== WAKE DISTRIBUTION (from {SAMPLE_N} samples) ===")
+print(f"  Near-zero  |delta| < 0.05:  {near_zero:.1%}  <- drives model to predict 0")
+print(f"  Mild wake  delta   < -0.20: {mild_wake:.1%}")
+print(f"  Deep wake  delta   < -0.50: {deep_wake:.1%}")
+print(f"  Accel zone delta   > +0.50: {accel:.1%}")
+
+if near_zero > 0.60:
+    needed = round(near_zero / max(mild_wake, 1e-4), 1)
+    print(f"\n  *** WARNING: {near_zero:.0%} of pixels are near-zero. ***")
+    print(f"  MSE will drive the model to predict 0 everywhere (flat predictions).")
+    print(f"  Recommended wake_weight >= {needed:.0f} to counteract class imbalance.")
+
+print(f"\nDone.")
