@@ -66,7 +66,7 @@ class FNO2d(nn.Module):
         out = self.out_proj(x)
         return out
 
-def compute_wake_loss(y_pred, y_target, sensor_mask, wake_threshold=0.3):
+def compute_wake_loss(y_pred, y_target, sensor_mask, wake_threshold=-0.3):
     """Compute additional loss for wake regions (low wind speed areas)."""
     wake_mask = (y_target < wake_threshold).float()
     wake_error = ((y_pred - y_target) ** 2) * wake_mask * sensor_mask
@@ -86,7 +86,7 @@ def compute_peak_loss(y_pred, y_target, sensor_mask, percentile=90):
 def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
                         grad_weight=0.0, spectral_weight=0.0, 
                         peak_weight=0.0, wake_weight=0.0,
-                        wake_threshold=0.3,
+                        wake_threshold=-0.3,
                         return_components=False):
     """Multi-component loss for FNO training."""
     if sensor_mask is None:

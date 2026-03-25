@@ -76,10 +76,24 @@ MODES1 = config.get('model', {}).get('modes1', 32)
 MODES2 = config.get('model', {}).get('modes2', 32)
 WIDTH = config.get('model', {}).get('width', 64)
 N_LAYERS = config.get('model', {}).get('n_layers', 5)
-GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.15)
+# FIX: physics terms now ramp from 0 over WARMUP_EPOCHS
+# to prevent the model collapsing to a flat constant field early in training.
+GRAD_WEIGHT     = config.get('loss', {}).get('gradient_weight', 0.5) 
 SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
-PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0)
-WAKE_WEIGHT = config.get('loss', {}).get('wake_weight', 0.0) # Load wake weight
+PEAK_WEIGHT     = config.get('loss', {}).get('peak_weight', 0.3)
+WAKE_WEIGHT     = config.get('loss', {}).get('wake_weight', 0.3) 
+WARMUP_EPOCHS   = config.get('loss', {}).get('warmup_epochs', 50)
+
+def get_loss_weights(epoch):
+    # Linearly ramp physics weights from 0 to their max over WARMUP_EPOCHS.
+    t = min(epoch / max(WARMUP_EPOCHS, 1), 1.0)
+    return dict(
+        grad_weight=GRAD_WEIGHT * t,
+        spectral_weight=SPECTRAL_WEIGHT * t,
+        peak_weight=PEAK_WEIGHT * t,
+        wake_weight=WAKE_WEIGHT * t,
+    )
+
 FORCE_H = None; FORCE_W = None
 
 # Worker count from config (0 = auto-detect)
@@ -172,12 +186,13 @@ def process_single_file(fp):
             
             delta_u_normalized = (val - u_over_uref_val) / (u_over_uref_val + 1e-6)
             # Clip to prevent explosions from rare outliers (99% data is in [-1, 1.5])
-            delta_u_normalized = np.clip(delta_u_normalized, -2.0, 10.0) 
+            delta_u_normalized = np.clip(delta_u_normalized, -1.5, 2.0) 
             Y_grid[0, iy, ix] = float(delta_u_normalized)
             
             sensor_w = float(df['is_sensor'].iloc[i]) if 'is_sensor' in df.columns else 1.0
             sdf_val = max(float(df['SDF'].iloc[i]), 0.0)
-            sdf_w = 1.0 + 19.0 * np.exp(-sdf_val / 5.0)
+            # FIX: reduced mask ceiling from 20x to 5x
+            sdf_w = 1.0 + 4.0 * np.exp(-sdf_val / 5.0)
             mask_grid[0, iy, ix] = sensor_w * valid_val * sdf_w
 
         Y_grid = np.nan_to_num(Y_grid, nan=0.0)
@@ -492,11 +507,14 @@ def main():
             mb = mb.float().to(device)
             
             pred = model(xb)
+            
+            # FIX: use epoch-dependent warmup weights
+            w = get_loss_weights(epoch)
             loss, components = sensor_weighted_mse(pred, yb, sensor_mask=mb, 
-                                                grad_weight=GRAD_WEIGHT, 
-                                                spectral_weight=SPECTRAL_WEIGHT,
-                                                peak_weight=PEAK_WEIGHT,
-                                                wake_weight=WAKE_WEIGHT,
+                                                grad_weight=w['grad_weight'], 
+                                                spectral_weight=w['spectral_weight'],
+                                                peak_weight=w['peak_weight'],
+                                                wake_weight=w['wake_weight'],
                                                 return_components=True)
             opt.zero_grad()
             loss.backward()

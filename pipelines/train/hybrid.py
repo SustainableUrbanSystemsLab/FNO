@@ -106,10 +106,11 @@ def process_single_file(fp):
             val = mag_vals[i]
             u_over_uref = float(df['U_over_Uref'].iloc[i])
             delta_u = (val - u_over_uref) / (u_over_uref + 1e-6)
-            delta_u = np.clip(delta_u, -2.0, 5.0) 
+            delta_u = np.clip(delta_u, -1.5, 2.0) 
             Y_grid[0, iy, ix] = float(delta_u)
             sdf_val = max(float(df['SDF'].iloc[i]), 0.0)
-            sdf_w = 1.0 + 19.0 * np.exp(-sdf_val / 5.0)
+            # FIX: reduced mask ceiling from 20x to 5x
+            sdf_w = 1.0 + 4.0 * np.exp(-sdf_val / 5.0)
             mask_grid[0, iy, ix] = sdf_w
         return (X_tensor.squeeze(0), torch.from_numpy(Y_grid), torch.from_numpy(mask_grid), chs), None
     except Exception as e: return None, f"Error processing {fp}: {e}"
@@ -231,11 +232,23 @@ def main():
         MODES2 = config.get('model', {}).get('modes2', 32)
         WIDTH = config.get('model', {}).get('width', 64)
         
-        GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.15)
+        GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.5)
         SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
-        PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0)
-        WAKE_WEIGHT = config.get('loss', {}).get('wake_weight', 0.0)
+        PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.3)
+        WAKE_WEIGHT = config.get('loss', {}).get('wake_weight', 0.3)
+        WARMUP_EPOCHS = config.get('loss', {}).get('warmup_epochs', 50)
         CHECKPOINT_INTERVAL = config.get('training', {}).get('checkpoint_interval', 10)
+
+        def get_loss_weights(epoch):
+            # Linearly ramp physics weights from 0 to their max over WARMUP_EPOCHS.
+            # Pure MSE for first 50 epochs ensures stable foundation.
+            t = min(epoch / max(WARMUP_EPOCHS, 1), 1.0)
+            return dict(
+                grad_weight=GRAD_WEIGHT * t,
+                spectral_weight=SPECTRAL_WEIGHT * t,
+                peak_weight=PEAK_WEIGHT * t,
+                wake_weight=WAKE_WEIGHT * t,
+            )
         EPOCHS_DIR = "epochs"
 
         if is_main_process(rank):
@@ -314,13 +327,15 @@ def main():
                 xb, yb, mb = xb.to(device), yb.to(device), mb.to(device)
                 pred = model(xb)
                 
+                # FIX: use epoch-dependent warmup weights
+                w = get_loss_weights(epoch)
                 loss, components = sensor_weighted_mse(
                     pred, yb, sensor_mask=mb,
-                    grad_weight=GRAD_WEIGHT,
-                    spectral_weight=SPECTRAL_WEIGHT,
-                    peak_weight=PEAK_WEIGHT,
-                    wake_weight=WAKE_WEIGHT,
-                    wake_threshold=-0.5, # Target deep deficits in delta-u space
+                    grad_weight=w['grad_weight'],
+                    spectral_weight=w['spectral_weight'],
+                    peak_weight=w['peak_weight'],
+                    wake_weight=w['wake_weight'],
+                    wake_threshold=-0.5, # Deep wake deficits
                     return_components=True
                 )
                 

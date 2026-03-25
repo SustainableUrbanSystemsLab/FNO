@@ -70,7 +70,7 @@ def build_input_tensor_from_gh(gh_outputs, H=None, W=None, include_U_ref_channel
     channels[0] /= 200.0   # SDF (0-200m -> 0.0-1.0)
     channels[1] /= 50.0    # Bldg_height (0-50m -> 0.0-1.0)
     channels[2] /= 10.0    # Z_relative (0-10m -> 0.0-1.0)
-    channels[3] *= 1.0     # U_over_Uref (Keep 1:1 as per spec 0.2-2.0)
+    channels[3] *= 2.0     # U_over_Uref (Normalised range 0.2-2.0 as per spec)
     channels[4] /= 500.0   # X_local (-500 to 500 -> -1.0 to 1.0)
     channels[5] /= 500.0   # Y_local (-500 to 500 -> -1.0 to 1.0)
     

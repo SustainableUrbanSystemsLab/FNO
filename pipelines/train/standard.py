@@ -79,10 +79,25 @@ DEVICE = f"cuda:{LOCAL_RANK}" if torch.cuda.is_available() else "cpu"
 from core.utils.training_logger import TrainingLogger
 
 # ... (Config loading remains the same until GRAD_WEIGHT) ...
-GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.15)
+# FIX: reduced max weights; physics terms now ramp from 0 over WARMUP_EPOCHS
+# to prevent the model collapsing to a flat constant field early in training.
+GRAD_WEIGHT     = config.get('loss', {}).get('gradient_weight', 0.5)   
 SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
-PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.0) 
-WAKE_WEIGHT = config.get('loss', {}).get('wake_weight', 0.0)
+PEAK_WEIGHT     = config.get('loss', {}).get('peak_weight', 0.3)        
+WAKE_WEIGHT     = config.get('loss', {}).get('wake_weight', 0.3)        
+WARMUP_EPOCHS   = config.get('loss', {}).get('warmup_epochs', 50)
+
+def get_loss_weights(epoch):
+    # Linearly ramp physics weights from 0 to their max over WARMUP_EPOCHS.
+    # Pure MSE for the first few epochs gives the model a stable foundation
+    # before physics penalties are introduced.
+    t = min(epoch / max(WARMUP_EPOCHS, 1), 1.0)
+    return dict(
+        grad_weight=GRAD_WEIGHT * t,
+        spectral_weight=SPECTRAL_WEIGHT * t,
+        peak_weight=PEAK_WEIGHT * t,
+        wake_weight=WAKE_WEIGHT * t,
+    )
 
 FORCE_H = None; FORCE_W = None
 
@@ -156,24 +171,26 @@ def load_single_csv(fp):
         
         for i,(iy,ix) in enumerate(idx_map):
             val = mag_vals[i]
-            # u_over_uref_val = float(df['U_over_Uref'].iloc[i]) # Unused in direct prediction
-            
-            # ✅ Precision Enhancement: Interior Punishment
+            u_ref = max(float(df['U_over_Uref'].iloc[i]), 0.01)
+
+            # FIX: convert to Delta_U per data spec: (Mag_U - U_ref) / U_ref
+            # This centres the target around 0 (wake deficit is negative, speedup positive)
+            # so the model has a meaningful zero baseline to learn from.
             if not np.isfinite(val):
-                val = 0.0              # Target Speed = 0
-                valid_val = 0.2        # Interior punishment weight
+                delta_u = -1.0         # stagnation point inside solid
+                valid_val = 0.2        # down-weight interior cells
             else:
+                delta_u = (val - u_ref) / u_ref
                 valid_val = 1.0
-            
-            # Target: Absolute Dimensionless Magnitude (Direct Prediction)
-            target_val = np.clip(val, 0.0, 5.0)
+
+            target_val = np.clip(delta_u, -1.5, 2.0)
             Y_grid[0, iy, ix] = float(target_val)
             
             sensor_w = float(df['is_sensor'].iloc[i]) if 'is_sensor' in df.columns else 1.0
             sdf_val = max(float(df['SDF'].iloc[i]), 0.0)
             
-            # ✅ Physics weight: Focal Sharpness
-            sdf_w = 1.0 + 19.0 * np.exp(-sdf_val / 5.0)
+            # FIX: reduced mask ceiling from 20x to 5x
+            sdf_w = 1.0 + 4.0 * np.exp(-sdf_val / 5.0)
                 
             mask_grid[0, iy, ix] = sensor_w * valid_val * sdf_w
 
@@ -421,12 +438,13 @@ for epoch in range(start_epoch, EPOCHS+1):
         xb, yb, mb = xb.to(DEVICE).float(), yb.to(DEVICE).float(), mb.to(DEVICE).float()
         pred = model(xb)
         
-        # Pass PEAK_WEIGHT here
+        # FIX: use epoch-dependent warmup weights
+        w = get_loss_weights(epoch)
         loss, components = sensor_weighted_mse(pred, yb, sensor_mask=mb, 
-                                             grad_weight=GRAD_WEIGHT, 
-                                             spectral_weight=SPECTRAL_WEIGHT, 
-                                             peak_weight=PEAK_WEIGHT,
-                                             wake_weight=WAKE_WEIGHT,
+                                             grad_weight=w['grad_weight'], 
+                                             spectral_weight=w['spectral_weight'], 
+                                             peak_weight=w['peak_weight'],
+                                             wake_weight=w['wake_weight'],
                                              return_components=True)
                                              
         opt.zero_grad(); loss.backward(); opt.step()
