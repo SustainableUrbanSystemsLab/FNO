@@ -66,16 +66,13 @@ def build_input_tensor_from_gh(gh_outputs, H=None, W=None, include_U_ref_channel
         channels[6][iy, ix] = float(gh_outputs['dir_sin'][pt_idx]) 
         channels[7][iy, ix] = float(gh_outputs['dir_cos'][pt_idx])
 
-    # 4. Fixed Physical Normalization (Crucial for generalization)
-    # Balanced denominators so all features are roughly in the same O(1) range
-    channels[0] /= 200.0   # SDF (0-200m -> 0.0-1.0) - Sharper building sensitivity
+    # 4. Standard Physical Normalization (Matching FNO Model Data Specification)
+    channels[0] /= 200.0   # SDF (0-200m -> 0.0-1.0)
     channels[1] /= 50.0    # Bldg_height (0-50m -> 0.0-1.0)
-    channels[2] /= 10.0    # Z_relative (0-10m -> 0.0-1.0) - High sensitivity for shear
+    channels[2] /= 10.0    # Z_relative (0-10m -> 0.0-1.0)
+    channels[3] *= 1.0     # U_over_Uref (Keep 1:1 as per spec 0.2-2.0)
     channels[4] /= 500.0   # X_local (-500 to 500 -> -1.0 to 1.0)
     channels[5] /= 500.0   # Y_local (-500 to 500 -> -1.0 to 1.0)
-
-    # Note: U_over_Uref is usually 0.1 to 1.0. We'll give it a slight boost to help the Conv1x1.
-    channels[3] *= 2.0     # U_over_Uref boost
     
     # Wind direction components are already -1.0 to 1.0
     channels[6] *= 1.0     # dir_sin

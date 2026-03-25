@@ -79,9 +79,11 @@ class PINNFNO(nn.Module):
             nn.Conv2d(hidden_channels // 2, out_channels, kernel_size=1)
         )
 
-        # Zero-initialize final layer so training starts from baseline
-        nn.init.constant_(self.refinement[-1].weight, 0)
-        nn.init.constant_(self.refinement[-1].bias, 0)
+        # Initialize refinement to be "ready" to learn
+        for m in self.refinement:
+            if isinstance(m, nn.Conv2d):
+                nn.init.xavier_normal_(m.weight)
+                if m.bias is not None: nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
         # x: (B, 8, H, W)
@@ -151,7 +153,7 @@ def momentum_smoothness_loss(u_field):
     return torch.mean(torch.clamp(laplacian ** 2 - 0.01, min=0.0))
 
 
-def wake_physics_loss(pred, target, sdf, wake_threshold=-0.3, sdf_threshold=0.05):
+def wake_physics_loss(pred, target, sdf, wake_threshold=-0.5, sdf_threshold=0.05):
     """
     Physics-aware wake loss:
     - Focuses on regions behind buildings (SDF > threshold, meaning NOT inside a building)
