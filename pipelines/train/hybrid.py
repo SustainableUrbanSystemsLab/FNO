@@ -242,17 +242,26 @@ def main():
             os.makedirs(EPOCHS_DIR, exist_ok=True)
             os.makedirs("training_logs", exist_ok=True)
 
-        # 3. Data Prep (Hybrid Lazy Loading)
-        x_npy = os.path.join(DATA_FOLDER, "X.npy")
-        y_npy = os.path.join(DATA_FOLDER, "Y.npy")
+        # 3. Data Prep (Priority: Scratch folder for speed)
+        paths_to_check = [
+            "/home/hice1/athach7/scratch/Training_Dataset",
+            DATA_FOLDER # Fallback from config.toml
+        ]
         
-        if os.path.exists(x_npy) and os.path.exists(y_npy):
-            if is_main_process(rank):
-                print(f"Loading via HybridNumpyDataset (mmap)...", flush=True)
-            temp_x = np.load(x_npy, mmap_mode='r')
-            sdf_max = temp_x[0, 0].max()
-            sdf_scaling = 200.0 if sdf_max <= 5.0 else 1.0
-            dataset = HybridNumpyDataset(x_npy, y_npy, sdf_scaling)
+        found_data = False
+        for p in paths_to_check:
+            x_npy, y_npy = os.path.join(p, "X.npy"), os.path.join(p, "Y.npy")
+            if os.path.exists(x_npy) and os.path.exists(y_npy):
+                if is_main_process(rank): print(f"LOADING PRE-PROCESSED: {p}", flush=True)
+                # Note: 'c' mode is copy-on-write, very fast for multiple GPUs
+                temp_x = np.load(x_npy, mmap_mode='r')
+                sdf_max = temp_x[0, 0].max()
+                sdf_scaling = 200.0 if sdf_max <= 5.0 else 1.0 # Auto-detect normalization
+                dataset = HybridNumpyDataset(x_npy, y_npy, sdf_scaling)
+                found_data = True
+                break
+        
+        if not found_data:
             if is_main_process(rank):
                 print(f"Falling back to CSV/NPZ loading (Memory Intensive)...", flush=True)
             files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.csv"), recursive=True))

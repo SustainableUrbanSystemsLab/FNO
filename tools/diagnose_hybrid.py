@@ -44,20 +44,7 @@ def run_diagnostics(model_path, data_path, output_name="hybrid_diagnostic.png"):
     gh = {c: df[c].to_numpy() for c in required}
     X, _ = build_input_tensor_from_gh(gh, device=DEVICE)
     
-    # 2. Load Model
-    config = load_config()
-    MODES1 = config.get("model", {}).get("modes1", 32)
-    MODES2 = config.get("model", {}).get("modes2", 32)
-    WIDTH = config.get("model", {}).get("width", 64)
-    N_LAYERS = config.get("model", {}).get("n_layers", 4)
-    
-    # Architecture params must match training
-    model = HybridFNO(
-        in_channels=X.shape[1], 
-        n_modes=(MODES1, MODES2), 
-        hidden_channels=WIDTH,
-        n_layers=N_LAYERS
-    ).to(DEVICE)
+    # 2. Load Checkpoint first to handle architecture inference
     checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=False)
     
     # Handle DDP and legacy formats
@@ -65,16 +52,59 @@ def run_diagnostics(model_path, data_path, output_name="hybrid_diagnostic.png"):
         state_dict = checkpoint['model_state_dict']
     else:
         state_dict = checkpoint
+    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items() if k != "_metadata"}
+
+    # Architecture discovery
+    config = load_config()
+    MODES1 = config.get("model", {}).get("modes1", 32)
+    MODES2 = config.get("model", {}).get("modes2", 32)
+    WIDTH = config.get("model", {}).get("width", 64)
+    N_LAYERS = config.get("model", {}).get("n_layers", 4)
+    
+    # Try to infer correct params from state_dict to avoid mismatches
+    auto_detected = False
+    if "fno.fno_blocks.convs.0.bias" in state_dict:
+        new_width = state_dict["fno.fno_blocks.convs.0.bias"].shape[0]
+        if new_width != WIDTH:
+            print(f"Auto-detecting width: {new_width}")
+            WIDTH = new_width
+            auto_detected = True
+            
+        if "fno.fno_blocks.convs.0.weight.tensor" in state_dict:
+            w_shape = state_dict["fno.fno_blocks.convs.0.weight.tensor"].shape
+            new_modes1 = w_shape[2]
+            new_modes2 = (w_shape[3] - 1) * 2
+            if new_modes1 != MODES1 or new_modes2 != MODES2:
+                print(f"Auto-detecting modes: ({new_modes1}, {new_modes2})")
+                MODES1, MODES2 = new_modes1, new_modes2
+                auto_detected = True
         
-    new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items() if k != "_metadata"}
+        # Count layers
+        count = 0
+        while f"fno.fno_blocks.convs.{count}.bias" in state_dict:
+            count += 1
+        if count != N_LAYERS:
+            print(f"Auto-detecting layers: {count}")
+            N_LAYERS = count
+            auto_detected = True
+
+    if auto_detected:
+        print("Using discovered architecture from weights (config.toml ignored for these parameters).")
+
+    # Architecture params must match training
+    model = HybridFNO(
+        in_channels=X.shape[1], 
+        n_modes=(MODES1, MODES2), 
+        hidden_channels=WIDTH,
+        n_layers=N_LAYERS
+    ).to(DEVICE)
+    
     try:
-        model.load_state_dict(new_state_dict, strict=True)
+        model.load_state_dict(state_dict, strict=True)
     except RuntimeError as e:
-        print(f"\nERROR: Architecture mismatch!")
-        print(f"The saved weights don't match the current model (modes={MODES1}, width={WIDTH}).")
-        print(f"This usually means config.toml was changed after training.")
+        print(f"\nERROR: Architecture mismatch remains after auto-detection!")
+        print(f"The saved weights don't match (current inferred: modes={MODES1}, width={WIDTH}, layers={N_LAYERS}).")
         print(f"\nFull error: {e}")
-        print(f"\n>>> Solution: Re-train with --fresh, or revert config.toml to match the saved weights.")
         return
     model.eval()
     

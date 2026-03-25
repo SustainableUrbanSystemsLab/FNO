@@ -145,16 +145,24 @@ def main():
             print("=" * 60, flush=True)
 
         # --- Dataset ---
-        x_npy = os.path.join(DATA_FOLDER, 'X.npy')
-        y_npy = os.path.join(DATA_FOLDER, 'Y.npy')
-
-        if os.path.exists(x_npy) and os.path.exists(y_npy):
-            if is_main(rank): print(f"Loading via PINNNumpyDataset (mmap)...", flush=True)
-            temp_x   = np.load(x_npy, mmap_mode='r')
-            sdf_max  = float(temp_x[0, 0].max())
-            sdf_scale = 200.0 if sdf_max <= 5.0 else 1.0
-            dataset  = PINNNumpyDataset(x_npy, y_npy, sdf_scale)
-        else:
+        paths_to_check = [
+            "/home/hice1/athach7/scratch/Training_Dataset",
+            DATA_FOLDER
+        ]
+        
+        found_data = False
+        for p in paths_to_check:
+            x_npy, y_npy = os.path.join(p, 'X.npy'), os.path.join(p, 'Y.npy')
+            if os.path.exists(x_npy) and os.path.exists(y_npy):
+                if is_main(rank): print(f"LOADING PRE-PROCESSED: {p}", flush=True)
+                temp_x   = np.load(x_npy, mmap_mode='r')
+                sdf_max  = float(temp_x[0, 0].max())
+                sdf_scale = 200.0 if sdf_max <= 5.0 else 1.0
+                dataset  = PINNNumpyDataset(x_npy, y_npy, sdf_scale)
+                found_data = True
+                break
+        
+        if not found_data:
             npz_files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.npz"), recursive=True))
             if not npz_files:
                 raise RuntimeError(f"No .npy or .npz data found in {DATA_FOLDER}")
