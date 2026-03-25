@@ -1,92 +1,400 @@
-import os, glob, torch, numpy as np, pandas as pd, sys
+"""
+Distributed Training for Hybrid FNO Model
+=========================================
+Features:
+- PyTorch Distributed Data Parallel (DDP)
+- Physics-Informed Loss (Divergence / Continuity)
+- Hashed Dataset Caching
+- Slurm/ICE Cluster Integration
+- Multiprocessing Data Preparation
+"""
+import os, sys, torch, numpy as np, pandas as pd, tomllib, argparse, glob, hashlib, pickle, traceback, time
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import DataLoader, TensorDataset
+from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
-import tomllib
 
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from core.utils.gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
+# Local imports
+from core.models.fno2d import FNO2d, sensor_weighted_mse
 from core.models.hybrid import HybridFNO
+from core.utils.gh_to_fno import build_input_tensor_from_gh
+from core.utils.training_logger import TrainingLogger
+from neuralop.losses import LpLoss, H1Loss
 
-# ================= CONFIG =================
-CONFIG_FILE = "config.toml"
-
-def load_config():
-    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../', CONFIG_FILE))
+# ============ Load Configuration ============
+def load_config(config_file):
+    """Load configuration from toml file."""
+    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../', config_file))
     if os.path.exists(config_path):
-        with open(config_path, "rb") as f:
+        with open(config_path, 'rb') as f:
             return tomllib.load(f)
+    print(f"Warning: {config_file} not found, using defaults")
     return {}
 
-config = load_config()
+# ============ Distributed Setup ============
+def setup_distributed():
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        rank = int(os.environ['RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        local_rank = int(os.environ.get('LOCAL_RANK', 0))
+        dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
+        torch.cuda.set_device(local_rank)
+        return local_rank, rank, world_size, True
+    return 0, 0, 1, False
 
-# --- Paths ---
-TEST_FOLDER = config.get("paths", {}).get("test_folder", "test_csv")
-MODEL_PATH  = "hybrid_fno_weights.pth" # Default hybrid weights file
+def cleanup_distributed():
+    if dist.is_initialized():
+        dist.destroy_process_group()
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+def is_main_process(rank):
+    return rank == 0
 
-print(f"Using device: {DEVICE}")
-print(f"Loading Hybrid Model: {MODEL_PATH}")
+# ============ Data Loading Boilerplate (from train_fno_distributed.py) ============
+def infer_grid(xs, ys, tol=1e-6):
+    xs = np.array(xs); ys = np.array(ys)
+    kx = np.round(xs/tol).astype(int); ky = np.round(ys/tol).astype(int)
+    ux = np.unique(kx); uy = np.unique(ky)
+    key_x = {k:i for i,k in enumerate(np.sort(ux))}
+    key_y = {k:i for i,k in enumerate(np.sort(uy))}
+    idx = [(key_y[kyv], key_x[kxv]) for kxv,kyv in zip(kx,ky)]
+    return len(ux), len(uy), idx
 
-# ================= LOAD MODEL =================
-model = None
-
-# ================= FIND TEST FILES =================
-if not os.path.exists(TEST_FOLDER):
-    raise RuntimeError(f"Test folder not found: {TEST_FOLDER}")
-
-files = sorted(f for f in glob.glob(os.path.join(TEST_FOLDER, "*.csv"))
-               if not f.endswith("_pred.csv"))
-
-print(f"Found {len(files)} test CSV files")
-
-# ================= INFERENCE LOOP =================
-for CSV in tqdm(files, desc="Hybrid Inference"):
+def process_single_file(fp):
     try:
-        out_csv = CSV.replace(".csv", "_hybrid_pred.csv")
-        df = pd.read_csv(CSV)
+        if fp.endswith(".npz"):
+            with np.load(fp) as data:
+                X = torch.from_numpy(data['X']).float()
+                Y = torch.from_numpy(data['Y']).float()
+                chs = data.get('channel_names', None)
+                if X.ndim == 4: X = X.squeeze(0)
+                if Y.ndim == 4: Y = Y.squeeze(0)
 
-        # Standardize columns
-        df.rename(columns={"X": "X_coords", "Y": "Y_coords", "x": "X_coords", "y": "Y_coords", "U_at_z": "U_over_Uref"}, inplace=True)
-        required = ["SDF", "Bldg_height", "Z_relative", "U_over_Uref", "X_coords", "Y_coords", "dir_sin", "dir_cos"]
+                # FIX: convert absolute Mag_U → Delta_U if needed
+                # (same auto-detection as PINNNumpyDataset: min >= -0.05 means no negatives yet)
+                if float(Y.min()) >= -0.05:
+                    u_ref = torch.clamp(X[3:4, :, :] / 2.0, min=0.01)
+                    Y = torch.clamp((Y - u_ref) / u_ref, -1.5, 2.0)
+
+                # FIX: build SDF mask from data instead of using ones_like
+                # (preserves near-wall weighting consistent with other pipelines)
+                if 'mask' in data:
+                    mask = torch.from_numpy(data['mask']).float()
+                    if mask.ndim == 4: mask = mask.squeeze(0)
+                else:
+                    sdf_meters = torch.clamp(X[0:1, :, :] * 200.0, min=0.0)
+                    mask = 1.0 + 4.0 * torch.exp(-sdf_meters / 5.0)
+
+                return (X, Y, mask, chs), None
+
+        df = pd.read_csv(fp)
+        rename_map = {'X': 'X_coords', 'Y': 'Y_coords', 'x': 'X_coords', 'y': 'Y_coords'}
+        df.rename(columns=rename_map, inplace=True)
+        cols = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_coords','Y_coords','dir_sin','dir_cos']
+        if any(c not in df.columns for c in cols): return None, f"{fp} missing input columns"
+        infer = infer_grid(df['X_coords'].to_numpy(), df['Y_coords'].to_numpy())
+        nx, ny, idx_map = infer
+        gh_out = {c: df[c].tolist() for c in cols}
+        X_tensor, chs = build_input_tensor_from_gh(gh_out, H=ny, W=nx, device='cpu')
         
-        gh = {c: df[c].to_numpy() for c in required}
-        X, _ = build_input_tensor_from_gh(gh, device=DEVICE)
+        mag_cols = ['mag_U_dimensionless','mag_U','mag_dimensionless']
+        mag_vals = None
+        for c in mag_cols:
+            if c in df.columns: mag_vals = df[c].to_numpy().astype(float); break
+        if mag_vals is None: return None, f"No mag target found in {fp}"
 
-        if model is None:
-            # Init Hybrid Model (Must match training params)
-            MODES1 = config.get('model', {}).get('modes1', 32)
-            MODES2 = config.get('model', {}).get('modes2', 32)
-            WIDTH = config.get('model', {}).get('width', 64)
+        Y_grid = np.zeros((1, ny, nx), dtype=np.float32)
+        mask_grid = np.zeros((1, ny, nx), dtype=np.float32)
+        for i, (iy, ix) in enumerate(idx_map):
+            val = mag_vals[i]
+            u_over_uref = float(df['U_over_Uref'].iloc[i])
+            delta_u = (val - u_over_uref) / (u_over_uref + 1e-6)
+            delta_u = np.clip(delta_u, -1.5, 2.0)
+            Y_grid[0, iy, ix] = float(delta_u)
+            sdf_val = max(float(df['SDF'].iloc[i]), 0.0)
+            # FIX: reduced mask ceiling from 20x to 5x
+            sdf_w = 1.0 + 4.0 * np.exp(-sdf_val / 5.0)
+            mask_grid[0, iy, ix] = sdf_w
+        return (X_tensor.squeeze(0), torch.from_numpy(Y_grid), torch.from_numpy(mask_grid), chs), None
+    except Exception as e: return None, f"Error processing {fp}: {e}"
+
+def get_cache_hash(files):
+    hash_parts = [f"files:{len(files)}", "hybrid_v1"]
+    for f in files[::10]: hash_parts.append(f"{os.path.basename(f)}_{os.path.getmtime(f):.0f}")
+    return hashlib.md5("|".join(hash_parts).encode()).hexdigest()
+
+def load_or_prepare_dataset(files, rank, is_main, num_workers):
+    cache_hash = get_cache_hash(files)
+    cache_path = f"dataset_cache_hybrid_{cache_hash}.pkl"
+    if os.path.exists(cache_path):
+        if is_main: print(f"Loading cached dataset from {cache_path}...")
+        with open(cache_path, 'rb') as f: return pickle.load(f)
+    if is_main: print(f"Preparing dataset using {num_workers} workers...")
+    with Pool(num_workers) as pool:
+        results = list(tqdm(pool.imap(process_single_file, files), total=len(files))) if is_main else list(pool.imap(process_single_file, files))
+    Xs, Ys, Masks, chs = [], [], [], None
+    for res, err in results:
+        if err: continue
+        X, Y, M, c = res
+        Xs.append(X); Ys.append(Y); Masks.append(M)
+        if chs is None: chs = c
+    if is_main:
+        with open(cache_path, 'wb') as f: pickle.dump((Xs, Ys, Masks, chs), f)
+    return Xs, Ys, Masks, chs
+
+class HybridNumpyDataset(torch.utils.data.Dataset):
+    """
+    Lazy-loading dataset for large mmap'd Numpy arrays.
+    Prevents OOM by only loading batches into RAM.
+    """
+    def __init__(self, x_path, y_path, sdf_scaling):
+        self.x_mmap = np.load(x_path, mmap_mode='c')
+        self.y_mmap = np.load(y_path, mmap_mode='c')
+        self.sdf_scaling = sdf_scaling
+        # FIX: detect whether Y is absolute Mag_U (needs Delta_U conversion) or correct already
+        _y_sample = self.y_mmap[:min(64, self.y_mmap.shape[0])].ravel()
+        self.convert_to_delta = (float(_y_sample.min()) >= -0.05)
+        if self.convert_to_delta:
+            print("[HybridNumpyDataset] Y appears to be absolute Mag_U (min>=0). "
+                  "Will convert to Delta_U = (Mag_U - U_ref) / U_ref on-the-fly.", flush=True)
+
+    def __len__(self):
+        return self.x_mmap.shape[0]
+
+    def __getitem__(self, idx):
+        x = torch.from_numpy(self.x_mmap[idx].copy()).float()
+        y = torch.from_numpy(self.y_mmap[idx].copy()).float()
+
+        # FIX: convert absolute Mag_U → Delta_U to match data spec
+        if self.convert_to_delta:
+            u_ref = torch.clamp(x[3:4, :, :] / 2.0, min=0.01)
+            y = (y - u_ref) / u_ref
+            y = torch.clamp(y, -1.5, 2.0)
+
+        # FIX: reduced mask ceiling from 20x to 5x
+        sdf_meters = x[0:1, :, :] * self.sdf_scaling
+        mask = 1.0 + 4.0 * torch.exp(-torch.clamp(sdf_meters, min=0.0) / 5.0)
+
+        return x, y, mask
+
+# ============ Main Training ============
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, default='config.toml')
+    parser.add_argument('--fresh', action='store_true')
+    parser.add_argument('--reset-patience', action='store_true')
+    args = parser.parse_args()
+
+    config = load_config(args.config)
+    local_rank, rank, world_size, is_distributed = setup_distributed()
+    device = torch.device(f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
+
+    try:
+        # 1. Path detection
+        if sys.platform == 'win32':
+            DATA_FOLDER = config.get('paths', {}).get('data_folder_windows', 'train_csv')
+        else:
+            linux_path = config.get('paths', {}).get('data_folder_linux', '')
+            ice_path = config.get('paths', {}).get('data_folder_ice', '')
             
-            model = HybridFNO(in_channels=X.shape[1], 
-                              n_modes=(MODES1, MODES2),
-                              hidden_channels=WIDTH).to(DEVICE)
-            state_dict = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
+            if is_main_process(rank):
+                print(f"[Diag] Raw Config - ICE: {ice_path}, Linux: {linux_path}", file=sys.stderr)
             
-            # Remove DDP prefix if present and ignore _metadata
-            new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items() if k != "_metadata"}
-            model.load_state_dict(new_state_dict, strict=False)
-            model.eval()
+            if ice_path: ice_path = os.path.expanduser(ice_path)
+            if linux_path: linux_path = os.path.expanduser(linux_path)
+            
+            def check_path(p, name):
+                if not p: return False
+                exists = os.path.exists(p)
+                isdir = os.path.isdir(p)
+                has_npy = False
+                if exists and isdir:
+                    has_npy = os.path.exists(os.path.join(p, "X.npy")) and os.path.exists(os.path.join(p, "Y.npy"))
+                
+                if is_main_process(rank):
+                    msg = f"[Diag] {name}: {p} | Exists: {exists}, IsDir: {isdir}, HasNPY: {has_npy}"
+                    print(msg, flush=True)
+                    print(msg, file=sys.stderr, flush=True)
+                return exists and isdir and has_npy
 
-        with torch.no_grad():
-            pred = model(X)
+            if check_path(ice_path, "ICE Path"):
+                DATA_FOLDER = ice_path
+            elif check_path(linux_path, "Linux Path"):
+                DATA_FOLDER = linux_path
+            else:
+                guesses = ["/storage/ice1/2/4/scratch/Training_Dataset", "/storage/ice1/2/4/athach7/Training_Dataset"]
+                for guess in guesses:
+                    if check_path(guess, "Hardcoded Guess"):
+                        DATA_FOLDER = guess
+                        break
+                else:
+                    DATA_FOLDER = os.path.join(os.path.dirname(__file__), 'train_csv')
+                    if is_main_process(rank):
+                        print(f"[Diag] Falling back to local: {DATA_FOLDER}", file=sys.stderr, flush=True)
+                
+        if is_main_process(rank):
+            print(f"Using Data Folder: {os.path.abspath(DATA_FOLDER)}", flush=True)
 
-        delta_grid = pred[0, 0].cpu().numpy()
-        _, _, _, _, idx_map = infer_grid_from_coords_simple(df["X_coords"], df["Y_coords"])
-        delta_flat = np.array([delta_grid[iy, ix] for (iy, ix) in idx_map])
+        # 2. Config & Training Params
+        MODEL_OUT = "hybrid_fno_weights.pth"
+        BATCH = config.get('training', {}).get('batch_size', 4)
+        EPOCHS = config.get('training', {}).get('epochs', 1000)
+        LR = config.get('training', {}).get('learning_rate', 5e-4)
+
+        MODES1 = config.get('model', {}).get('modes1', 32)
+        MODES2 = config.get('model', {}).get('modes2', 32)
+        WIDTH = config.get('model', {}).get('width', 64)
         
-        baseline = df["U_over_Uref"].to_numpy()
-        mag_final = np.clip(baseline * (delta_flat + 1.0), 0.0, None)
+        GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.5)    # was 0.15
+        SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
+        PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.3)         # was 0.0
+        WAKE_WEIGHT = config.get('loss', {}).get('wake_weight', 0.3)         # was 0.0
+        WARMUP_EPOCHS = config.get('loss', {}).get('warmup_epochs', 50)
+        CHECKPOINT_INTERVAL = config.get('training', {}).get('checkpoint_interval', 10)
 
-        df["delta_pred"] = np.round(delta_flat, 6)
-        df["mag_U"] = np.round(mag_final, 6)
+        def get_loss_weights(epoch):
+            """Linearly ramp physics weights from 0 to their max over WARMUP_EPOCHS."""
+            t = min(epoch / max(WARMUP_EPOCHS, 1), 1.0)
+            return dict(
+                grad_weight=GRAD_WEIGHT * t,
+                spectral_weight=SPECTRAL_WEIGHT * t,
+                peak_weight=PEAK_WEIGHT * t,
+                wake_weight=WAKE_WEIGHT * t,
+            )
+        EPOCHS_DIR = "epochs"
+
+        if is_main_process(rank):
+            os.makedirs(EPOCHS_DIR, exist_ok=True)
+            os.makedirs("training_logs", exist_ok=True)
+
+        # 3. Data Prep (Priority: Scratch folder for speed)
+        paths_to_check = [
+            "/home/hice1/athach7/scratch/Training_Dataset",
+            DATA_FOLDER # Fallback from config.toml
+        ]
         
-        df.rename(columns={"X_coords": "x", "Y_coords": "y"}, inplace=True)
-        df.to_csv(out_csv, index=False)
+        found_data = False
+        for p in paths_to_check:
+            x_npy, y_npy = os.path.join(p, "X.npy"), os.path.join(p, "Y.npy")
+            if os.path.exists(x_npy) and os.path.exists(y_npy):
+                if is_main_process(rank): print(f"LOADING PRE-PROCESSED: {p}", flush=True)
+                # Note: 'c' mode is copy-on-write, very fast for multiple GPUs
+                temp_x = np.load(x_npy, mmap_mode='r')
+                sdf_max = temp_x[0, 0].max()
+                sdf_scaling = 200.0 if sdf_max <= 5.0 else 1.0 # Auto-detect normalization
+                dataset = HybridNumpyDataset(x_npy, y_npy, sdf_scaling)
+                found_data = True
+                break
+        
+        if not found_data:
+            if is_main_process(rank):
+                print(f"Falling back to CSV/NPZ loading (Memory Intensive)...", flush=True)
+            files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.csv"), recursive=True))
+            if not files:
+                files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.npz"), recursive=True))
+            if not files: raise RuntimeError(f"No CSV or NPZ data found in {DATA_FOLDER}")
+            num_workers = max(1, cpu_count() // 2)
+            Xs, Ys, Masks, _ = load_or_prepare_dataset(files, rank, is_main_process(rank), num_workers)
+            max_h = max(t.shape[1] for t in Xs); max_w = max(t.shape[2] for t in Xs)
+            def pad(t_list):
+                return torch.stack([torch.nn.functional.pad(t, (0, max_w-t.shape[2], 0, max_h-t.shape[1])) for t in t_list])
+            dataset = TensorDataset(pad(Xs), pad(Ys), pad(Masks))
+        
+        sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank) if is_distributed else None
+        loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, shuffle=(sampler is None), num_workers=2 if not is_distributed else 1)
+
+        # 4. Model & Optimization
+        sample_x, _, _ = dataset[0]
+        model = HybridFNO(in_channels=sample_x.shape[0], 
+                          n_modes=(MODES1, MODES2),
+                          hidden_channels=WIDTH).to(device)
+        
+        if os.path.exists(MODEL_OUT) and not args.fresh:
+            if is_main_process(rank): print(f"Resuming weights: {MODEL_OUT}", flush=True)
+            try:
+                saved = torch.load(MODEL_OUT, map_location=device, weights_only=False)
+                result = model.load_state_dict(saved, strict=True)
+                if is_main_process(rank): print("  Weights loaded successfully (strict=True)", flush=True)
+            except RuntimeError as e:
+                if is_main_process(rank):
+                    print(f"  WARNING: Weight mismatch detected — starting FRESH (use --fresh to suppress this).", flush=True)
+                    print(f"  Reason: {e}", file=sys.stderr, flush=True)
+                # Architecture changed: don't load incompatible weights at all
+
+        if is_distributed: model = DDP(model, device_ids=[local_rank])
+        
+        opt = torch.optim.AdamW(model.parameters(), lr=LR)
+        # Add scheduler for consistency with standard training
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
+        
+        l2_loss = LpLoss(d=2, p=2); h1_loss = H1Loss(d=2)
+        if is_main_process(rank): logger = TrainingLogger(output_dir="training_logs")
+
+        PATIENCE = config.get('training', {}).get('patience', 100)
+        best_loss = float('inf')
+        patience_count = 0
+
+        for epoch in range(1, EPOCHS + 1):
+            if is_distributed: sampler.set_epoch(epoch)
+            model.train()
+            running_loss = 0.0
+            for xb, yb, mb in loader:
+                xb, yb, mb = xb.to(device), yb.to(device), mb.to(device)
+                pred = model(xb)
+
+                # FIX: use epoch-dependent warmup weights
+                w = get_loss_weights(epoch)
+                loss, components = sensor_weighted_mse(
+                    pred, yb, sensor_mask=mb,
+                    grad_weight=w['grad_weight'],
+                    spectral_weight=w['spectral_weight'],
+                    peak_weight=w['peak_weight'],
+                    wake_weight=w['wake_weight'],
+                    wake_threshold=-0.5,
+                    return_components=True
+                )
+
+                opt.zero_grad(); loss.backward(); opt.step()
+                running_loss += loss.item() * xb.shape[0]
+
+            if is_distributed:
+                loss_tensor = torch.tensor(running_loss, device=device)
+                dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
+                running_loss = loss_tensor.item()
+
+            scheduler.step()
+            avg_loss = running_loss / len(dataset)
+            warmup_pct = min(epoch / max(WARMUP_EPOCHS, 1), 1.0) * 100
+
+            if is_main_process(rank):
+                print(f"Epoch {epoch}/{EPOCHS} Loss: {avg_loss:.6e} | Warmup: {warmup_pct:.0f}%", flush=True)
+                if avg_loss < best_loss:
+                    best_loss = avg_loss
+                    patience_count = 0
+                    torch.save(model.module.state_dict() if is_distributed else model.state_dict(), MODEL_OUT)
+                    print(f"   * Best model saved (Loss: {best_loss:.6e})", flush=True)
+                else:
+                    patience_count += 1
+                    if patience_count >= PATIENCE:
+                        print(f"Early stopping at epoch {epoch}", flush=True)
+                        break
+
+                if epoch % CHECKPOINT_INTERVAL == 0:
+                    ckpt_path = os.path.join(EPOCHS_DIR, f"hybrid_epoch_{epoch}.pth")
+                    torch.save(model.module.state_dict() if is_distributed else model.state_dict(), ckpt_path)
+                    print(f"  > Periodic checkpoint saved: {ckpt_path}", flush=True)
 
     except Exception as e:
-        print(f"FAILED on {CSV}: {e}")
+        print(f"CRITICAL ERROR on Rank {rank}: {e}", file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
+        if is_distributed: cleanup_distributed()
+        sys.exit(1)
 
-print("\nHybrid Inference finished.")
+    cleanup_distributed()
+
+if __name__ == "__main__":
+    main()
