@@ -11,37 +11,51 @@ import numpy as np
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
 DATA_PATHS = [
-    "/storage/ice1/2/4/athach7/Training_Dataset",
+    "/home/hice1/athach7/scratch/Training_Dataset", # SCRATCH (Priority)
+    "/storage/ice1/2/4/athach7/Training_Dataset", # STORAGE
     "./train_csv",
 ]
 
 DATA = None
 for p in DATA_PATHS:
-    if os.path.exists(os.path.join(p, "X.npy")) and os.path.exists(os.path.join(p, "Y.npy")):
-        DATA = p
-        break
+    if os.path.exists(p):
+        DATA = p; break
 
 if DATA is None:
-    print("ERROR: Could not find X.npy and Y.npy"); sys.exit(1)
+    print("ERROR: Could not find any data folders"); sys.exit(1)
 
-print(f"Loading from: {DATA}")
-X = np.load(os.path.join(DATA, "X.npy"), mmap_mode='r')
-Y = np.load(os.path.join(DATA, "Y.npy"), mmap_mode='r')
+print(f"Inspecting data in: {DATA}")
 
-N = X.shape[0]
-print(f"\n=== Shapes ===")
-print(f"  X: {X.shape}  (N, channels, H, W)")
-print(f"  Y: {Y.shape}  (N, 1, H, W)")
+x_npy = os.path.join(DATA, "X.npy")
+y_npy = os.path.join(DATA, "Y.npy")
 
-# Sample a small subset of samples to get stats fast
-SAMPLE_N = min(50, N)
-rng = np.random.default_rng(42)
-idx = rng.choice(N, SAMPLE_N, replace=False)
-print(f"\nComputing stats from {SAMPLE_N} random samples (fast)...")
-
-# Load sampled data into RAM
-x_sample = np.array(X[idx])   # (50, 8, H, W)
-y_sample = np.array(Y[idx])   # (50, 1, H, W)
+if os.path.exists(x_npy) and os.path.exists(y_npy):
+    print("Found mmap'd X.npy and Y.npy")
+    X = np.load(x_npy, mmap_mode='r')
+    Y = np.load(y_npy, mmap_mode='r')
+    N = X.shape[0]
+    print(f"\n=== Shapes ===\n  X: {X.shape}\n  Y: {Y.shape}")
+    
+    rng = np.random.default_rng(42)
+    idx = rng.choice(N, min(50, N), replace=False)
+    x_sample, y_sample = np.array(X[idx]), np.array(Y[idx])
+else:
+    print("Searching for individual .npz files...")
+    import glob
+    npz_files = sorted(glob.glob(os.path.join(DATA, "**/*.npz"), recursive=True))
+    if not npz_files:
+        print(f"ERROR: No .npy or .npz files found in {DATA}"); sys.exit(1)
+    
+    print(f"Found {len(npz_files)} .npz files")
+    N = len(npz_files)
+    rng = np.random.default_rng(42)
+    idx = rng.choice(N, min(50, N), replace=False)
+    
+    Xs, Ys = [], []
+    for i in idx:
+        with np.load(npz_files[i]) as data:
+            Xs.append(data['X']); Ys.append(data['Y'])
+    x_sample, y_sample = np.stack(Xs), np.stack(Ys)
 
 print(f"\n=== X Channels (normalized) ===")
 ch_names = ['SDF', 'Bldg_height', 'Z_relative', 'U_over_Uref', 'X_local', 'Y_local', 'dir_sin', 'dir_cos']

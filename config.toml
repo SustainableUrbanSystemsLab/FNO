@@ -27,15 +27,15 @@ width = 32   # Small for fast convergence
 n_layers = 4
 
 [loss]
-# Loss function weights (MSE is always 1.0)
-gradient_weight = 2.0   # High for sharpness
-spectral_weight = 0.01  # Increased slightly to help FNO converge
-peak_weight = 0.5
-wake_weight = 1.0       # High priority for wake capture
+# Aggressive weights to force the model out of "flat" mode
+gradient_weight   = 5.0   # Extremely high to force sharp wake edges
+spectral_weight   = 0.01
+peak_weight       = 1.0
+wake_weight       = 10.0   # Massive weight to force the model to care about the deficit
 
 # PINN-specific physics constraints
-continuity_weight = 0.1   # Penalize non-divergence-free predictions (∇·u ≈ 0)
-momentum_weight = 0.05    # Penalize physically implausible sharp spikes (ν∇²u)
+continuity_weight = 1.0    # Increased to enforce ∇·u ≈ 0
+momentum_weight   = 0.1 
 
 [performance]
 # Number of parallel workers for data loading (0 = auto-detect)
@@ -48,10 +48,10 @@ account = "gts-pkastner3"
 # Partition (leave empty for default)
 partition = ""
 # Walltime for the job (HH:MM:SS)
-walltime = "04:00:00"
+walltime = "08:00:00"
 
 [ice]
 # ICE cluster configuration
 account = "coc"
 partition = "" # Optional, add if needed
-walltime = "04:00:00"
+walltime = "08:00:00"
