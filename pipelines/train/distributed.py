@@ -2,21 +2,19 @@
 # Usage: torchrun --nproc_per_node=2 train_fno_distributed.py
 #    or: python train_fno_distributed.py (falls back to single GPU)
 
-import os, glob, numpy as np, pandas as pd, torch, hashlib, pickle, sys, argparse, time
+import os, glob, numpy as np, torch, sys, argparse, time
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
-from multiprocessing import Pool, cpu_count
+from multiprocessing import cpu_count
 
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from core.models.fno2d import FNO2d, sensor_weighted_mse
 from core.utils.training_logger import TrainingLogger
-from data.wind_dataset import WindDataset
-from argparse import Namespace
 
 # ============ Load Configuration ============
 import argparse
@@ -64,10 +62,7 @@ else:
 
 MODEL_OUT = config.get('paths', {}).get('model_output', 'fno_mag_weights.pth')
 CHECKPOINT_PATH = config.get('paths', {}).get('checkpoint_file', 'epochs/checkpoint_latest.pth')
-CACHE_FILE = "dataset_cache_neuralop.pkl"
 EPOCHS_DIR = "epochs"
-if is_main_process(rank):
-    os.makedirs(EPOCHS_DIR, exist_ok=True)
 BATCH = config.get('training', {}).get('batch_size', 4)
 EPOCHS = config.get('training', {}).get('epochs', 200)
 LR = config.get('training', {}).get('learning_rate', 1e-3)
@@ -127,186 +122,58 @@ def cleanup_distributed():
 def is_main_process(rank):
     return rank == 0
 
-def get_dataset_options(config, phase='train', is_train=True):
-    """Bridge config.toml to Pix2PixHD-style opt object for WindDataset."""
-    return Namespace(
-        dataroot=DATA_FOLDER,
-        phase=phase,
-        isTrain=is_train,
-        no_flip=config.get('training', {}).get('no_flip', False),
-        input_nc=config.get('model', {}).get('in_channels', 8),
-        output_nc=config.get('model', {}).get('out_channels', 1),
-        wind_stats=config.get('paths', {}).get('wind_stats', ''),
-        n_downsample_global=config.get('model', {}).get('n_downsample_global', 0),
-        netG=config.get('model', {}).get('netG', 'global'),
-        n_local_enhancers=config.get('model', {}).get('n_local_enhancers', 0),
-        batchSize=BATCH
-    )
+# ============ Dataset for monolithic X.npy / Y.npy ============
+# Channel layout (from build_input_tensor_from_gh / regenerate_dataset.py):
+#   X[0]: SDF / 200          (0-1, 0=building boundary)
+#   X[1]: Bldg_height / 50   (0-1)
+#   X[2]: Z_relative / 10    (0-1)
+#   X[3]: U_over_Uref * 2    (0.4-2.0)
+#   X[4]: X_local / 500      (-1 to 1, building-centered)
+#   X[5]: Y_local / 500      (-1 to 1, building-centered)
+#   X[6]: dir_sin            (-1 to 1)
+#   X[7]: dir_cos            (-1 to 1)
+# Target Y: delta_u = (mag_U - U_ref) / U_ref, clipped [-2, 10]
 
-# ============ Grid Inference ============
-def infer_grid(xs, ys, tol=1e-6):
-    xs = np.array(xs); ys = np.array(ys)
-    kx = np.round(xs/tol).astype(int); ky = np.round(ys/tol).astype(int)
-    ux = np.unique(kx); uy = np.unique(ky)
-    key_x = {k:i for i,k in enumerate(np.sort(ux))}
-    key_y = {k:i for i,k in enumerate(np.sort(uy))}
-    idx = [(key_y[kyv], key_x[kxv]) for kxv,kyv in zip(kx,ky)]
-    return len(ux), len(uy), idx
-
-# ============ Single File Processing (for multiprocessing) ============
-def process_single_file(fp):
-    """Process a single CSV file and return tensors. Used by multiprocessing pool."""
-    try:
-        df = pd.read_csv(fp)
-        rename_map = {'X': 'X_coords', 'Y': 'Y_coords', 'x': 'X_coords', 'y': 'Y_coords'}
-        df.rename(columns=rename_map, inplace=True)
-
-        cols = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_coords','Y_coords','dir_sin','dir_cos']
-        if any(c not in df.columns for c in cols):
-            return None, f"{fp} missing input columns"
+class NpyDataset(Dataset):
+    """Dataset that loads from monolithic X.npy and Y.npy arrays.
+    
+    These files are produced by tools/regenerate_dataset.py which uses
+    build_input_tensor_from_gh for physical normalization and computes
+    delta_u = (mag - U_ref) / U_ref as the target.
+    """
+    def __init__(self, X_path, Y_path, augment=False):
+        if not os.path.exists(X_path):
+            raise FileNotFoundError(f"X.npy not found at {X_path}")
+        if not os.path.exists(Y_path):
+            raise FileNotFoundError(f"Y.npy not found at {Y_path}")
         
-        infer = infer_grid(df['X_coords'].to_numpy(), df['Y_coords'].to_numpy())
-        if infer is None:
-            return None, f"Grid inference failed for {fp}"
-        nx, ny, idx_map = infer
-
-        gh_out = {c: df[c].tolist() for c in cols}
-        X_tensor, chs = build_input_tensor_from_gh(gh_out, H=ny, W=nx, device='cpu')
-
-        mag_cols_dim = ['mag_U_dimensionless','mag_U','mag_dimensionless']
-        mag_vals = None
-        for c in mag_cols_dim:
-            if c in df.columns:
-                mag_vals = df[c].to_numpy().astype(float)
-                break
-        if mag_vals is None:
-            if all(cc in df.columns for cc in ['Ux_dimensionless','Uy_dimensionless','Uz_dimensionless']):
-                uxs = df['Ux_dimensionless'].to_numpy().astype(float)
-                uys = df['Uy_dimensionless'].to_numpy().astype(float)
-                uzs = df['Uz_dimensionless'].to_numpy().astype(float)
-                mag_vals = np.sqrt(uxs**2 + uys**2 + uzs**2)
-        if mag_vals is None:
-            return None, f"No dimensionless mag target found in {fp}"
-
-        Y_grid = np.zeros((1, ny, nx), dtype=np.float32) * np.nan
-        mask_grid = np.zeros((1, ny, nx), dtype=np.float32)
+        # Memory-map for low RAM usage
+        self.X = np.load(X_path, mmap_mode='r')  # (N, 8, H, W)
+        self.Y = np.load(Y_path, mmap_mode='r')  # (N, 1, H, W)
+        self.augment = augment
         
-        for i, (iy, ix) in enumerate(idx_map):
-            val = mag_vals[i]
-            u_over_uref_val = float(df['U_over_Uref'].iloc[i])
-            
-            if not np.isfinite(val):
-                val = 0.0
-                valid_val = 0.2
-            else:
-                valid_val = 1.0
-            
-            delta_u_normalized = (val - u_over_uref_val) / (u_over_uref_val + 1e-6)
-            # Clip to prevent explosions from rare outliers (99% data is in [-1, 1.5])
-            delta_u_normalized = np.clip(delta_u_normalized, -1.5, 2.0) 
-            Y_grid[0, iy, ix] = float(delta_u_normalized)
-            
-            sensor_w = float(df['is_sensor'].iloc[i]) if 'is_sensor' in df.columns else 1.0
-            sdf_val = max(float(df['SDF'].iloc[i]), 0.0)
-            # FIX: reduced mask ceiling from 20x to 5x
-            sdf_w = 1.0 + 4.0 * np.exp(-sdf_val / 5.0)
-            mask_grid[0, iy, ix] = sensor_w * valid_val * sdf_w
-
-        Y_grid = np.nan_to_num(Y_grid, nan=0.0)
-        return (X_tensor.squeeze(0), torch.from_numpy(Y_grid), torch.from_numpy(mask_grid), chs), None
-    except Exception as e:
-        return None, f"Error processing {fp}: {e}"
-
-def get_cache_hash(files):
-    """Generate a hash based on file count, folder count, and sample of modification times."""
-    # Include total count and folder structure
-    folders = set(os.path.dirname(f) for f in files)
-    hash_parts = [
-        f"files:{len(files)}",
-        f"folders:{len(folders)}",
-    ]
-    # Sample files for modification times (every 10th file for speed)
-    for f in files[::10]:
-        hash_parts.append(f"{os.path.basename(f)}_{os.path.getmtime(f):.0f}")
-    hash_input = "|".join(hash_parts)
-    return hashlib.md5(hash_input.encode()).hexdigest()
-
-def load_or_prepare_dataset(files, rank, is_main):
-    """Load from cache or prepare dataset with multiprocessing."""
-    # 1. Compute hash of the current file list to ensure cache validity
-    current_hash = get_cache_hash(files)
-    expected_cache_name = f"{CACHE_FILE.replace('.pkl', '')}_{current_hash}.pkl"
+        assert self.X.shape[0] == self.Y.shape[0], \
+            f"X/Y sample count mismatch: {self.X.shape[0]} vs {self.Y.shape[0]}"
     
-    if is_main:
-        print(f"Dataset Hash: {current_hash}")
-        print(f"Looking for cache: {expected_cache_name}")
-
-    # 2. Try to load EXACT matching cache
-    if os.path.exists(expected_cache_name):
-        if is_main:
-            print(f"Loading cached dataset from {expected_cache_name}...")
-        try:
-            with open(expected_cache_name, 'rb') as f:
-                return pickle.load(f)
-        except Exception as e:
-            if is_main:
-                print(f"Failed to load cache {expected_cache_name}: {e}")
-                print("Will rebuild cache.")
+    def __len__(self):
+        return self.X.shape[0]
     
-    # 2b. Check for LEGACY cache (dataset_cache_neuralop.pkl) and migrate if exists
-    elif os.path.exists(CACHE_FILE):
-        if is_main:
-            print(f"Found legacy cache {CACHE_FILE}. Migrating to {expected_cache_name}...")
-            try:
-                # Rename/Move to new hashed name
-                os.rename(CACHE_FILE, expected_cache_name)
-                # Load the newly renamed file
-                with open(expected_cache_name, 'rb') as f:
-                    return pickle.load(f)
-            except Exception as e:
-                print(f"Migration/Loading failed: {e}. Will rebuild.")
-
-    # 3. If no exact match (and migration failed/not possible), we must rebuild.
-    # (Optional: Cleanup old caches to save space)
-    if is_main:
-        old_caches = glob.glob(f"{CACHE_FILE.replace('.pkl', '')}_*.pkl")
-        for oc in old_caches:
-            if oc != expected_cache_name:
-                print(f"Removing stale cache: {oc}")
-                try: os.remove(oc)
-                except: pass
-
-    # Prepare dataset with multiprocessing
-    if is_main:
-        print(f"Preparing dataset from {len(files)} files using {NUM_WORKERS} workers...")
-    
-    with Pool(NUM_WORKERS) as pool:
-        if is_main:
-            results = list(tqdm(pool.imap(process_single_file, files), total=len(files), desc="Data Preparation"))
-        else:
-            results = list(pool.imap(process_single_file, files))
-    
-    Xs, Ys, Masks = [], [], []
-    chs = None
-    for result, error in results:
-        if error:
-            if is_main:
-                print(f"Warning: {error}")
-            continue
-        X, Y, M, c = result
-        Xs.append(X)
-        Ys.append(Y)
-        Masks.append(M)
-        if chs is None:
-            chs = c
-    
-    # Save to cache (only on main process)
-    if is_main:
-        print(f"Saving cache to {expected_cache_name}...")
-        with open(expected_cache_name, 'wb') as f:
-            pickle.dump((Xs, Ys, Masks, chs), f)
-    
-    return Xs, Ys, Masks, chs
+    def __getitem__(self, idx):
+        x = np.array(self.X[idx], copy=True, dtype=np.float32)  # (8, H, W)
+        y = np.array(self.Y[idx], copy=True, dtype=np.float32)  # (1, H, W)
+        
+        # Optional augmentation: random horizontal flip
+        if self.augment and np.random.random() > 0.5:
+            x = x[:, :, ::-1].copy()
+            y = y[:, :, ::-1].copy()
+            # Negate X_local (ch4) and dir_sin (ch6) for horizontal flip
+            x[4] = -x[4]
+            x[6] = -x[6]
+        
+        x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+        y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        return torch.from_numpy(x), torch.from_numpy(y)
 
 # ============ Main Training ============
 def main():
@@ -337,22 +204,38 @@ def main():
             try: shutil.rmtree("epochs", ignore_errors=True)
             except: pass
  
+    # Create output directories
+    os.makedirs(EPOCHS_DIR, exist_ok=True)
+    
+    # Load dataset from monolithic X.npy / Y.npy
+    x_path = os.path.join(DATA_FOLDER, 'X.npy')
+    y_path = os.path.join(DATA_FOLDER, 'Y.npy')
+    
     if is_main_process(rank):
-        print(f"Loading WindDataset from {DATA_FOLDER}...")
-
-    train_opt = get_dataset_options(config, phase='train', is_train=True)
-    train_dataset = WindDataset()
-    train_dataset.initialize(train_opt)
+        print(f"Loading dataset from {DATA_FOLDER}...")
+        print(f"  X path: {x_path}")
+        print(f"  Y path: {y_path}")
+    
+    train_dataset = NpyDataset(x_path, y_path, augment=True)
+    in_ch = train_dataset.X.shape[1]  # Should be 8
     
     if is_main_process(rank):
         print("=" * 50)
         print("DATASET INITIALIZATION COMPLETE")
         print("=" * 50)
         print(f"  Total samples: {len(train_dataset)}")
-        print(f"  Input channels: {train_opt.input_nc}")
+        print(f"  X shape: {train_dataset.X.shape}")
+        print(f"  Y shape: {train_dataset.Y.shape}")
+        print(f"  Input channels: {in_ch}")
+        # Print channel ranges for sanity check
+        for ch_idx, ch_name in enumerate(['SDF/200', 'Height/50', 'Z_rel/10', 'U_ref*2', 'X_loc/500', 'Y_loc/500', 'dir_sin', 'dir_cos']):
+            ch_data = train_dataset.X[:, ch_idx]
+            print(f"    Ch{ch_idx} ({ch_name}): [{ch_data.min():.3f}, {ch_data.max():.3f}]")
+        y_data = train_dataset.Y[:, 0]
+        print(f"    Y (delta_u): [{y_data.min():.3f}, {y_data.max():.3f}] mean={y_data.mean():.3f}")
         print("=" * 50)
 
-    # Create DataLoader through WindDataset
+    # Create DataLoader
     if is_distributed:
         sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
         loader = DataLoader(train_dataset, batch_size=BATCH, sampler=sampler, num_workers=NUM_WORKERS)
@@ -364,7 +247,6 @@ def main():
         print(f"  FNO2d: modes=({MODES1},{MODES2}), width={WIDTH}, layers={N_LAYERS}")
         
     # Create model
-    in_ch = train_opt.input_nc
     model = FNO2d(in_channels=in_ch, out_channels=1, modes1=MODES1, modes2=MODES2, 
                   width=WIDTH, n_layers=N_LAYERS).to(device)
     
@@ -489,12 +371,14 @@ def main():
         running_wake = 0.0
         
         for batch in pbar:
-            # Access from WindDataset dictionary
-            xb = batch['label'].to(device)
-            yb = batch['image'].to(device)
+            # NpyDataset returns (x_tensor, y_tensor) directly
+            xb, yb = batch
+            xb = xb.to(device)
+            yb = yb.to(device)
             
-            # Reconstruct building mask from SDF channel (Channel 0)
-            # Standard mask: 1.0 (valid) except interior punishment if SDF < 0.
+            # Build mask from SDF channel (Channel 0, physically normalized: SDF/200)
+            # SDF=0 means building boundary, SDF>0 means outside building
+            # After /200 normalization, SDF>0 still correctly identifies exterior
             sdf = xb[:, 0:1, :, :]
             mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
             
