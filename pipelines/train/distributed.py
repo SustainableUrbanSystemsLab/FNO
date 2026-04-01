@@ -420,7 +420,7 @@ def main():
         print("=" * 50)
         
         # Initialize training logger for publication metrics
-        logger = TrainingLogger(output_dir="training_logs", is_main=is_main_process(rank))
+        logger = TrainingLogger(output_dir="training_logs")
         logger.start_training({
             'batch_size': BATCH,
             'epochs': EPOCHS,
