@@ -316,12 +316,21 @@ def main():
         print(f"  X shape: {train_dataset.X.shape}")
         print(f"  Y shape: {train_dataset.Y.shape}")
         print(f"  Input channels: {in_ch}")
-        # Print channel ranges for sanity check
-        for ch_idx, ch_name in enumerate(['SDF/200', 'Height/50', 'Z_rel/10', 'U_ref*2', 'X_loc/500', 'Y_loc/500', 'dir_sin', 'dir_cos']):
-            ch_data = train_dataset.X[:, ch_idx]
-            print(f"    Ch{ch_idx} ({ch_name}): [{ch_data.min():.3f}, {ch_data.max():.3f}]")
-        y_data = train_dataset.Y[:, 0]
-        print(f"    Y (delta_u): [{y_data.min():.3f}, {y_data.max():.3f}] mean={y_data.mean():.3f}")
+        print(f"  Remap active: {train_dataset.needs_remap}")
+        
+        # Sanity check: run one sample through __getitem__ to show POST-REMAP ranges
+        print("  --- Post-remap sample check (sample 0) ---")
+        try:
+            sample_x, sample_y = train_dataset[0]
+            ch_names = ['SDF/200', 'Height/50', 'Z_rel/10', 'U_ref*2', 'X_loc/500', 'Y_loc/500', 'dir_sin', 'dir_cos']
+            for ch_idx, ch_name in enumerate(ch_names):
+                ch = sample_x[ch_idx]
+                print(f"    Ch{ch_idx} ({ch_name}): [{ch.min():.4f}, {ch.max():.4f}] mean={ch.mean():.4f}")
+            print(f"    Y (delta_u): [{sample_y.min():.4f}, {sample_y.max():.4f}] mean={sample_y.mean():.4f}")
+        except Exception as e:
+            print(f"  !!! ERROR in sample check: {e}")
+            import traceback
+            traceback.print_exc()
         print("=" * 50)
 
     # Create DataLoader
@@ -442,6 +451,9 @@ def main():
                 print(f"  [WARNING] Start epoch {start_epoch} > Total epochs {EPOCHS}. Training may exit immediately.")
                 print(f"  [TIP] Use --reset-patience to treat 'epochs' as a new phase duration.")
 
+    if is_main_process(rank):
+        sys.stdout.flush()  # Ensure all printout appears in log before training starts
+    
     for epoch in range(start_epoch, target_end_epoch + 1):
         epoch_start = time.time()
         if is_distributed:
