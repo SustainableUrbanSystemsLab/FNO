@@ -123,23 +123,50 @@ def is_main_process(rank):
     return rank == 0
 
 # ============ Dataset for monolithic X.npy / Y.npy ============
-# Channel layout (from build_input_tensor_from_gh / regenerate_dataset.py):
-#   X[0]: SDF / 200          (0-1, 0=building boundary)
-#   X[1]: Bldg_height / 50   (0-1)
-#   X[2]: Z_relative / 10    (0-1)
-#   X[3]: U_over_Uref * 2    (0.4-2.0)
-#   X[4]: X_local / 500      (-1 to 1, building-centered)
-#   X[5]: Y_local / 500      (-1 to 1, building-centered)
-#   X[6]: dir_sin            (-1 to 1)
-#   X[7]: dir_cos            (-1 to 1)
-# Target Y: delta_u = (mag_U - U_ref) / U_ref, clipped [-2, 10]
+#
+# The X.npy/Y.npy on ICE were created by the Conditional Transformer's
+# convert_to_npz.py and have THIS channel layout:
+#   Raw[0]: X_coords         (raw meters, -485 to 521)
+#   Raw[1]: Y_coords         (raw meters, -514 to 491)
+#   Raw[2]: Z_relative       (raw, 0-1.8)
+#   Raw[3]: SDF              (raw, can be negative inside buildings)
+#   Raw[4]: Bldg_height      (raw meters, 0-152)
+#   Raw[5]: U_over_Uref      (raw, ~0-0.26)
+#   Raw[6]: dir_sin          (-1 to 1)
+#   Raw[7]: dir_cos          (-1 to 1)
+#   Y[0]:   mag_U            (raw wind magnitude)
+#
+# The FNO expects (from build_input_tensor_from_gh):
+#   FNO[0]: SDF / 200          (0-1)
+#   FNO[1]: Bldg_height / 50   (0-1)
+#   FNO[2]: Z_relative / 10    (0-1)
+#   FNO[3]: U_over_Uref * 2    (0.4-2.0)
+#   FNO[4]: X_local / 500      (-1 to 1, building-centered)
+#   FNO[5]: Y_local / 500      (-1 to 1, building-centered)
+#   FNO[6]: dir_sin            (-1 to 1)
+#   FNO[7]: dir_cos            (-1 to 1)
+#   Y:      delta_u = (mag_U - U_ref) / U_ref, clipped [-2, 10]
+#
+# This dataset remaps on-the-fly.
+
+# Transformer -> FNO channel index mapping
+_RAW_X_COORDS  = 0
+_RAW_Y_COORDS  = 1
+_RAW_Z_REL     = 2
+_RAW_SDF       = 3
+_RAW_BLDG_H    = 4
+_RAW_U_REF     = 5
+_RAW_DIR_SIN   = 6
+_RAW_DIR_COS   = 7
 
 class NpyDataset(Dataset):
-    """Dataset that loads from monolithic X.npy and Y.npy arrays.
+    """Dataset that loads Transformer-format X.npy/Y.npy and remaps to FNO format.
     
-    These files are produced by tools/regenerate_dataset.py which uses
-    build_input_tensor_from_gh for physical normalization and computes
-    delta_u = (mag - U_ref) / U_ref as the target.
+    Performs on-the-fly:
+      1. Channel reordering (Transformer order -> FNO order)
+      2. Physical normalization (SDF/200, Height/50, etc.)
+      3. Building-centered coordinate computation
+      4. Target conversion: mag_U -> delta_u = (mag - U_ref) / U_ref
     """
     def __init__(self, X_path, Y_path, augment=False):
         if not os.path.exists(X_path):
@@ -154,13 +181,75 @@ class NpyDataset(Dataset):
         
         assert self.X.shape[0] == self.Y.shape[0], \
             f"X/Y sample count mismatch: {self.X.shape[0]} vs {self.Y.shape[0]}"
+        
+        # Auto-detect format: if Ch0 range >> 1, it's Transformer format (raw coords)
+        ch0_max = np.abs(self.X[0, 0]).max()
+        self.needs_remap = ch0_max > 10.0  # SDF/200 would be 0-1; raw X_coords is ~500
+        if self.needs_remap:
+            print("[NpyDataset] Detected Transformer-format data. Will remap to FNO format on-the-fly.")
+        else:
+            print("[NpyDataset] Data appears to already be in FNO format (Ch0 range < 10).")
     
     def __len__(self):
         return self.X.shape[0]
     
+    def _remap_to_fno(self, raw_x, raw_y):
+        """Convert Transformer channel layout + raw mag_U to FNO format."""
+        H, W = raw_x.shape[1], raw_x.shape[2]
+        out_x = np.zeros_like(raw_x)  # (8, H, W)
+        
+        # --- Channel remapping with physical normalization ---
+        sdf_raw = raw_x[_RAW_SDF]          # Can be negative inside buildings
+        bldg_h  = raw_x[_RAW_BLDG_H]
+        z_rel   = raw_x[_RAW_Z_REL]
+        u_ref   = raw_x[_RAW_U_REF]
+        x_coord = raw_x[_RAW_X_COORDS]
+        y_coord = raw_x[_RAW_Y_COORDS]
+        
+        # FNO Ch0: SDF / 200
+        out_x[0] = sdf_raw / 200.0
+        
+        # FNO Ch1: Bldg_height / 50
+        out_x[1] = bldg_h / 50.0
+        
+        # FNO Ch2: Z_relative / 10
+        out_x[2] = z_rel / 10.0
+        
+        # FNO Ch3: U_over_Uref * 2
+        out_x[3] = u_ref * 2.0
+        
+        # FNO Ch4,5: Building-centered coordinates / 500
+        bldg_mask = bldg_h > 0
+        if bldg_mask.any():
+            x_center = x_coord[bldg_mask].mean()
+            y_center = y_coord[bldg_mask].mean()
+        else:
+            x_center = x_coord.mean()
+            y_center = y_coord.mean()
+        out_x[4] = (x_coord - x_center) / 500.0
+        out_x[5] = (y_coord - y_center) / 500.0
+        
+        # FNO Ch6,7: dir_sin, dir_cos (already correct)
+        out_x[6] = raw_x[_RAW_DIR_SIN]
+        out_x[7] = raw_x[_RAW_DIR_COS]
+        
+        # --- Target: mag_U -> delta_u ---
+        mag_u = raw_y[0]         # (H, W)
+        # u_ref is per-pixel; compute delta where u_ref > 0
+        has_data = u_ref > 1e-6
+        out_y = np.zeros_like(raw_y)  # (1, H, W)
+        out_y[0, has_data] = (mag_u[has_data] - u_ref[has_data]) / (u_ref[has_data] + 1e-6)
+        out_y = np.clip(out_y, -2.0, 10.0)
+        
+        return out_x, out_y
+    
     def __getitem__(self, idx):
         x = np.array(self.X[idx], copy=True, dtype=np.float32)  # (8, H, W)
         y = np.array(self.Y[idx], copy=True, dtype=np.float32)  # (1, H, W)
+        
+        # Remap from Transformer format to FNO format if needed
+        if self.needs_remap:
+            x, y = self._remap_to_fno(x, y)
         
         # Optional augmentation: random horizontal flip
         if self.augment and np.random.random() > 0.5:
