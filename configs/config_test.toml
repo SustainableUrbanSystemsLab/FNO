@@ -1,27 +1,37 @@
-# Test Config
+# Quick test config — runs 2 epochs to verify data pipeline works
+# Usage: bash slurm/deploy_ice.sh --config configs/config_test.toml --gpu h200 --ngpus 1 --fresh
+
 [paths]
-# Using same paths as original
 data_folder_windows = "C:/LabShare/Dataset/FormFluxCases/Compressed/Training_Dataset"
-data_folder_linux = "/storage/coda1/p-pkastner3/0/ikaradag3/FNO/Training_Dataset"
-model_output = "test_model.pth"
+data_folder_linux = "./train_csv"
+data_folder_ice = "/home/hice1/athach7/scratch/Training_Dataset"
+test_folder = 'test_csv'
+model_output = "fno_test_weights.pth"
 
 [training]
-batch_size = 2
-epochs = 1
-learning_rate = 0.001
-patience = 5
+batch_size = 4
+epochs = 2
+learning_rate = 5e-4
+patience = 50
 checkpoint_interval = 1
 
 [model]
-modes1 = 16
-modes2 = 16
-width = 32
-n_layers = 2
+modes1 = 32
+modes2 = 32
+width = 64
+n_layers = 4
 
 [loss]
-gradient_weight = 0.1
-spectral_weight = 0.1
-peak_weight = 1.0
+gradient_weight   = 0.0
+spectral_weight   = 0.0
+peak_weight       = 0.0
+wake_weight       = 0.0
+warmup_epochs     = 1
 
 [performance]
-num_workers = 0
+num_workers = 4
+
+[ice]
+account = "coc"
+partition = ""
+walltime = "00:15:00"
