@@ -14,8 +14,9 @@ from multiprocessing import Pool, cpu_count
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from core.models.fno2d import FNO2d, sensor_weighted_mse
-from core.utils.gh_to_fno import build_input_tensor_from_gh
 from core.utils.training_logger import TrainingLogger
+from data.wind_dataset import WindDataset
+from argparse import Namespace
 
 # ============ Load Configuration ============
 import argparse
@@ -125,6 +126,22 @@ def cleanup_distributed():
 
 def is_main_process(rank):
     return rank == 0
+
+def get_dataset_options(config, phase='train', is_train=True):
+    """Bridge config.toml to Pix2PixHD-style opt object for WindDataset."""
+    return Namespace(
+        dataroot=DATA_FOLDER,
+        phase=phase,
+        isTrain=is_train,
+        no_flip=config.get('training', {}).get('no_flip', False),
+        input_nc=config.get('model', {}).get('in_channels', 8),
+        output_nc=config.get('model', {}).get('out_channels', 1),
+        wind_stats=config.get('paths', {}).get('wind_stats', ''),
+        n_downsample_global=config.get('model', {}).get('n_downsample_global', 0),
+        netG=config.get('model', {}).get('netG', 'global'),
+        n_local_enhancers=config.get('model', {}).get('n_local_enhancers', 0),
+        batchSize=BATCH
+    )
 
 # ============ Grid Inference ============
 def infer_grid(xs, ys, tol=1e-6):
@@ -320,60 +337,34 @@ def main():
             try: shutil.rmtree("epochs", ignore_errors=True)
             except: pass
  
-    # Load files
-    files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**", "*.csv"), recursive=True))
-    if not files:
-        raise RuntimeError("No training files in " + DATA_FOLDER)
-    
-    # Load or prepare dataset (with caching and multiprocessing)
-    Xs, Ys, Masks, chs = load_or_prepare_dataset(files, rank, is_main_process(rank))
-
-    # Pad tensors
-    max_h = max(t.shape[1] for t in Xs)
-    max_w = max(t.shape[2] for t in Xs)
     if is_main_process(rank):
-        print(f"Max grid size: {max_h}x{max_w}. Padding...")
+        print(f"Loading WindDataset from {DATA_FOLDER}...")
 
-    import torch.nn.functional as F
-    def pad_to_max(t_list, h, w):
-        padded = []
-        for t in t_list:
-            pad_h = h - t.shape[1]
-            pad_w = w - t.shape[2]
-            p = F.pad(t, (0, pad_w, 0, pad_h), mode='constant', value=0)
-            padded.append(p)
-        return torch.stack(padded, dim=0)
-
-    X_all = pad_to_max(Xs, max_h, max_w)
-    Y_all = pad_to_max(Ys, max_h, max_w)
-    M_all = pad_to_max(Masks, max_h, max_w)
+    train_opt = get_dataset_options(config, phase='train', is_train=True)
+    train_dataset = WindDataset()
+    train_dataset.initialize(train_opt)
     
     if is_main_process(rank):
         print("=" * 50)
-        print("DATASET PREPARATION COMPLETE")
+        print("DATASET INITIALIZATION COMPLETE")
         print("=" * 50)
-        print(f"  Total samples: {len(Xs)}")
-        print(f"  Input shape:   {X_all.shape} (N, C, H, W)")
-        print(f"  Target shape:  {Y_all.shape}")
-        print(f"  Mask shape:    {M_all.shape}")
-        print(f"  Input channels: {chs}")
+        print(f"  Total samples: {len(train_dataset)}")
+        print(f"  Input channels: {train_opt.input_nc}")
         print("=" * 50)
 
-    # Create dataset and sampler
-    dataset = TensorDataset(X_all, Y_all, M_all)
-    
+    # Create DataLoader through WindDataset
     if is_distributed:
-        sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=False)
-        loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler)
+        sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=sampler, num_workers=NUM_WORKERS)
     else:
-        loader = DataLoader(dataset, batch_size=BATCH, shuffle=False)
+        loader = DataLoader(train_dataset, batch_size=BATCH, shuffle=True, num_workers=NUM_WORKERS)
 
     if is_main_process(rank):
         print("CREATING MODEL...")
         print(f"  FNO2d: modes=({MODES1},{MODES2}), width={WIDTH}, layers={N_LAYERS}")
         
     # Create model
-    in_ch = X_all.shape[1]
+    in_ch = train_opt.input_nc
     model = FNO2d(in_channels=in_ch, out_channels=1, modes1=MODES1, modes2=MODES2, 
                   width=WIDTH, n_layers=N_LAYERS).to(device)
     
@@ -449,7 +440,7 @@ def main():
         print("=" * 50)
         
         # Initialize training logger for publication metrics
-        logger = TrainingLogger(output_dir="training_logs")
+        logger = TrainingLogger(output_dir="training_logs", is_main=is_main_process(rank))
         logger.start_training({
             'batch_size': BATCH,
             'epochs': EPOCHS,
@@ -459,11 +450,7 @@ def main():
             'modes2': MODES2,
             'width': WIDTH,
             'n_layers': N_LAYERS,
-            'gradient_weight': GRAD_WEIGHT,
-            'spectral_weight': SPECTRAL_WEIGHT,
-            'dataset_size': len(dataset),
-            'distributed': is_distributed,
-            'world_size': world_size,
+            'dataset_size': len(train_dataset),
         }, model=model.module if is_distributed else model)
     else:
         logger = None
@@ -501,14 +488,19 @@ def main():
         running_peak = 0.0
         running_wake = 0.0
         
-        for xb, yb, mb in pbar:
-            xb = xb.float().to(device)
-            yb = yb.float().to(device)
-            mb = mb.float().to(device)
+        for batch in pbar:
+            # Access from WindDataset dictionary
+            xb = batch['label'].to(device)
+            yb = batch['image'].to(device)
+            
+            # Reconstruct building mask from SDF channel (Channel 0)
+            # Standard mask: 1.0 (valid) except interior punishment if SDF < 0.
+            sdf = xb[:, 0:1, :, :]
+            mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
             
             pred = model(xb)
             
-            # FIX: use epoch-dependent warmup weights
+            # Use epoch-dependent warmup weights
             w = get_loss_weights(epoch)
             loss, components = sensor_weighted_mse(pred, yb, sensor_mask=mb, 
                                                 grad_weight=w['grad_weight'], 
@@ -532,7 +524,7 @@ def main():
                 pbar.set_postfix({"loss": f"{loss.item():.4e}"})
         
         scheduler.step()
-        n_samples = len(dataset)
+        n_samples = len(train_dataset)
         
         # Aggregate loss across GPUs
         if is_distributed:

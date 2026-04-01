@@ -7,28 +7,35 @@ class SpectralConv2d(nn.Module):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.modes1 = modes1
-        self.modes2 = modes2
-        self.weight_real = nn.Parameter( (1.0/(in_channels*out_channels)) * torch.randn(in_channels, out_channels, modes1, modes2) )
-        self.weight_imag = nn.Parameter( (1.0/(in_channels*out_channels)) * torch.randn(in_channels, out_channels, modes1, modes2) )
+        self.modes1 = modes1 # Number of modes to keep in first dimension (H)
+        self.modes2 = modes2 # Number of modes to keep in second dimension (W)
+        self.scale = (1.0 / (in_channels * out_channels))
+        # For rfft2 training on real input, we need weights for two corners
+        # to correctly capture the symmetry of the spectrum.
+        self.weights1 = nn.Parameter(self.scale * torch.randn(in_channels, out_channels, self.modes1, self.modes2, dtype=torch.complex64))
+        self.weights2 = nn.Parameter(self.scale * torch.randn(in_channels, out_channels, self.modes1, self.modes2, dtype=torch.complex64))
 
-    def compl_mul2d(self, input_ft, weight_r, weight_i):
-        x = input_ft[:, :, :self.modes1, :self.modes2]
-        xr = x.real.unsqueeze(2)
-        xi = x.imag.unsqueeze(2)
-        wr = weight_r.unsqueeze(0)
-        wi = weight_i.unsqueeze(0)
-        out_r = (xr * wr - xi * wi).sum(dim=1)
-        out_i = (xr * wi + xi * wr).sum(dim=1)
-        return torch.complex(out_r, out_i)
+    def compl_mul2d(self, input, weights):
+        # (batch, in_channel, x, y), (in_channel, out_channel, x, y) -> (batch, out_channel, x, y)
+        return torch.einsum("bixy,ioxy->boxy", input, weights)
 
     def forward(self, x):
-        B, C, H, W = x.shape
-        x_ft = torch.fft.fft2(x, dim=(-2, -1))
-        out_ft = torch.zeros((B, self.out_channels, H, W), dtype=torch.complex64, device=x.device)
-        out_ft[:, :, :self.modes1, :self.modes2] = self.compl_mul2d(x_ft, self.weight_real, self.weight_imag)
-        x_out = torch.fft.ifft2(out_ft, dim=(-2, -1)).real
-        return x_out
+        batchsize = x.shape[0]
+        # Real-to-complex FFT
+        x_ft = torch.fft.rfft2(x)
+
+        # Output shape matches rfft2 output: (B, C, H, W//2 + 1)
+        out_ft = torch.zeros(batchsize, self.out_channels, x.size(-2), x.size(-1)//2 + 1, dtype=torch.complex64, device=x.device)
+        
+        # Multiply relevant corners
+        out_ft[:, :, :self.modes1, :self.modes2] = \
+            self.compl_mul2d(x_ft[:, :, :self.modes1, :self.modes2], self.weights1)
+        out_ft[:, :, -self.modes1:, :self.modes2] = \
+            self.compl_mul2d(x_ft[:, :, -self.modes1:, :self.modes2], self.weights2)
+
+        # Inverse complex-to-real FFT
+        x = torch.fft.irfft2(out_ft, s=(x.size(-2), x.size(-1)))
+        return x
 
 class FNO2d(nn.Module):
     def __init__(self, in_channels, out_channels, modes1=16, modes2=16, width=64, n_layers=4):
@@ -57,11 +64,12 @@ class FNO2d(nn.Module):
                     nn.init.zeros_(m.bias)
 
     def forward(self, x):
+        # x: (B, C, H, W)
         x = self.in_proj(x)
         for block in self.fourier_layers:
             spec = block[0](x)
             point = block[1](x)
-            x = x + spec + point
+            x = x + spec + point # Residual connection
             x = self.activation(x)
         out = self.out_proj(x)
         return out

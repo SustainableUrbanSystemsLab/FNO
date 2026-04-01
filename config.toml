@@ -14,24 +14,26 @@ test_folder = 'test_csv'
 model_output = "fno_mag_weights.pth"
 
 [training]
-batch_size = 8  # Larger batch fits easily with small model
-epochs = 50
-learning_rate = 1e-4    # Lowered for Hybrid stability
-patience = 100
-checkpoint_interval = 10  # Save resumable checkpoint every N epochs
+batch_size = 8
+epochs = 200
+learning_rate = 5e-4
+patience = 50
+checkpoint_interval = 10
 
 [model]
-modes1 = 12  # Small: 504/12 = 42px scale, still captures building wakes
-modes2 = 12
-width = 32   # Small for fast convergence
+# Sufficient modes to capture narrow building wakes
+modes1 = 32
+modes2 = 32
+width = 64
 n_layers = 4
 
 [loss]
-# Aggressive weights to force the model out of "flat" mode
-gradient_weight   = 5.0   # Extremely high to force sharp wake edges
+# Balanced with MSE to allow features to emerge
+gradient_weight   = 0.15
 spectral_weight   = 0.01
-peak_weight       = 1.0
-wake_weight       = 10.0   # Massive weight to force the model to care about the deficit
+peak_weight       = 0.5
+wake_weight       = 0.5
+warmup_epochs     = 50     # Keep early training stable
 
 # PINN-specific physics constraints
 continuity_weight = 1.0    # Increased to enforce ∇·u ≈ 0
