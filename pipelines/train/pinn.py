@@ -18,8 +18,8 @@ from tqdm import tqdm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from core.models.pinn_fno import PINNFNO, pinn_loss
-from core.utils.gh_to_fno import build_input_tensor_from_gh
 from core.utils.training_logger import TrainingLogger
+from pipelines.train.distributed import NpyDataset
 
 
 # ============ Config ============
@@ -48,41 +48,6 @@ def cleanup_distributed():
 
 def is_main(rank):
     return rank == 0
-
-
-# ============ Dataset ============
-class PINNNumpyDataset(torch.utils.data.Dataset):
-    """Lazy-loading mmap dataset for PINN training."""
-    def __init__(self, x_path, y_path, sdf_scaling=200.0):
-        self.X = np.load(x_path, mmap_mode='c')
-        self.Y = np.load(y_path, mmap_mode='c')
-        self.sdf_scaling = sdf_scaling
-
-    def __len__(self):
-        return self.X.shape[0]
-
-    def __getitem__(self, idx):
-        x = torch.from_numpy(self.X[idx].copy()).float()
-        y = torch.from_numpy(self.Y[idx].copy()).float()
-        sdf_meters = x[0:1, :, :] * self.sdf_scaling
-        mask = 1.0 + 19.0 * torch.exp(-torch.clamp(sdf_meters, min=0.0) / 5.0)
-        return x, y, mask
-
-class PINNNPZDataset(torch.utils.data.Dataset):
-    """Dataset for a list of .npz files."""
-    def __init__(self, files, sdf_scaling=200.0):
-        self.files = files
-        self.sdf_scaling = sdf_scaling
-    def __len__(self): return len(self.files)
-    def __getitem__(self, idx):
-        with np.load(self.files[idx]) as data:
-            x = torch.from_numpy(data['X']).float()
-            y = torch.from_numpy(data['Y']).float()
-            if x.ndim == 4: x = x.squeeze(0)
-            if y.ndim == 4: y = y.squeeze(0)
-            sdf_meters = x[0:1, :, :] * self.sdf_scaling
-            mask = 1.0 + 19.0 * torch.exp(-torch.clamp(sdf_meters, min=0.0) / 5.0)
-            return x, y, mask
 
 
 # ============ Main ============
@@ -145,43 +110,21 @@ def main():
             print("=" * 60, flush=True)
 
         # --- Dataset ---
-        paths_to_check = [
-            "/home/hice1/athach7/scratch/Training_Dataset",
-            DATA_FOLDER
-        ]
+        x_path = os.path.join(DATA_FOLDER, 'X.npy')
+        y_path = os.path.join(DATA_FOLDER, 'Y.npy')
         
-        found_data = False
-        for p in paths_to_check:
-            x_npy, y_npy = os.path.join(p, 'X.npy'), os.path.join(p, 'Y.npy')
-            if os.path.exists(x_npy) and os.path.exists(y_npy):
-                if is_main(rank): print(f"LOADING PRE-PROCESSED: {p}", flush=True)
-                temp_x   = np.load(x_npy, mmap_mode='r')
-                sdf_max  = float(temp_x[0, 0].max())
-                sdf_scale = 200.0 if sdf_max <= 5.0 else 1.0
-                dataset  = PINNNumpyDataset(x_npy, y_npy, sdf_scale)
-                found_data = True
-                break
-        
-        if not found_data:
-            npz_files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.npz"), recursive=True))
-            if not npz_files:
-                raise RuntimeError(f"No .npy or .npz data found in {DATA_FOLDER}")
-            if is_main(rank): print(f"Loading {len(npz_files)} .npz files...", flush=True)
-            # Sample one to get scaling
-            with np.load(npz_files[0]) as data:
-                sdf_max = float(data['X'][0, 0].max())
-            sdf_scale = 200.0 if sdf_max <= 5.0 else 1.0
-            dataset = PINNNPZDataset(npz_files, sdf_scale)
-
         if is_main(rank):
-            print(f"Dataset size: {len(dataset)} samples", flush=True)
-
+            print(f"Loading dataset from {DATA_FOLDER}...")
+            print(f"  X path: {x_path}")
+            print(f"  Y path: {y_path}")
+            
+        dataset = NpyDataset(x_path, y_path, augment=True)
+        
         sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank) if is_distributed else None
-        loader  = DataLoader(dataset, batch_size=BATCH, sampler=sampler,
-                             shuffle=(sampler is None), num_workers=2, pin_memory=True)
+        loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, shuffle=(sampler is None), num_workers=2)
 
         # --- Model ---
-        sample_x, _, _ = dataset[0]
+        sample_x, _ = dataset[0]
         model = PINNFNO(
             in_channels=sample_x.shape[0],
             n_modes=(MODES1, MODES2),
@@ -215,8 +158,14 @@ def main():
                                             'momentum_loss','wake_loss','peak_loss']}
             epoch_start = time.time()
 
-            for xb, yb, mb in loader:
-                xb, yb, mb = xb.to(device), yb.to(device), mb.to(device)
+            for batch in loader:
+                xb, yb = batch
+                xb, yb = xb.to(device), yb.to(device)
+                
+                # Build mask from SDF channel
+                sdf = xb[:, 0:1, :, :]
+                mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+                
                 pred = model(xb)
 
                 loss, comps = pinn_loss(

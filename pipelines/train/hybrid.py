@@ -22,9 +22,11 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'
 # Local imports
 from core.models.fno2d import FNO2d, sensor_weighted_mse
 from core.models.hybrid import HybridFNO
-from core.utils.gh_to_fno import build_input_tensor_from_gh
 from core.utils.training_logger import TrainingLogger
 from neuralop.losses import LpLoss, H1Loss
+
+# Share dataset logic
+from pipelines.train.distributed import NpyDataset
 
 # ============ Load Configuration ============
 def load_config(config_file):
@@ -53,116 +55,6 @@ def cleanup_distributed():
 
 def is_main_process(rank):
     return rank == 0
-
-# ============ Data Loading Boilerplate (from train_fno_distributed.py) ============
-def infer_grid(xs, ys, tol=1e-6):
-    xs = np.array(xs); ys = np.array(ys)
-    kx = np.round(xs/tol).astype(int); ky = np.round(ys/tol).astype(int)
-    ux = np.unique(kx); uy = np.unique(ky)
-    key_x = {k:i for i,k in enumerate(np.sort(ux))}
-    key_y = {k:i for i,k in enumerate(np.sort(uy))}
-    idx = [(key_y[kyv], key_x[kxv]) for kxv,kyv in zip(kx,ky)]
-    return len(ux), len(uy), idx
-
-def process_single_file(fp):
-    try:
-        if fp.endswith(".npz"):
-            with np.load(fp) as data:
-                X = torch.from_numpy(data['X']).float()
-                Y = torch.from_numpy(data['Y']).float()
-                # Use default mask if not provided
-                if 'mask' in data:
-                    mask = torch.from_numpy(data['mask']).float()
-                elif 'Mask' in data:
-                    mask = torch.from_numpy(data['Mask']).float()
-                else:
-                    mask = torch.ones_like(Y)
-                chs = data.get('channel_names', None)
-                # Ensure shapes match [C, H, W]
-                if X.ndim == 4: X = X.squeeze(0)
-                if Y.ndim == 4: Y = Y.squeeze(0)
-                if mask.ndim == 4: mask = mask.squeeze(0)
-                return (X, Y, mask, chs), None
-
-        df = pd.read_csv(fp)
-        rename_map = {'X': 'X_coords', 'Y': 'Y_coords', 'x': 'X_coords', 'y': 'Y_coords'}
-        df.rename(columns=rename_map, inplace=True)
-        cols = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_coords','Y_coords','dir_sin','dir_cos']
-        if any(c not in df.columns for c in cols): return None, f"{fp} missing input columns"
-        infer = infer_grid(df['X_coords'].to_numpy(), df['Y_coords'].to_numpy())
-        nx, ny, idx_map = infer
-        gh_out = {c: df[c].tolist() for c in cols}
-        X_tensor, chs = build_input_tensor_from_gh(gh_out, H=ny, W=nx, device='cpu')
-        
-        mag_cols = ['mag_U_dimensionless','mag_U','mag_dimensionless']
-        mag_vals = None
-        for c in mag_cols:
-            if c in df.columns: mag_vals = df[c].to_numpy().astype(float); break
-        if mag_vals is None: return None, f"No mag target found in {fp}"
-
-        Y_grid = np.zeros((1, ny, nx), dtype=np.float32)
-        mask_grid = np.zeros((1, ny, nx), dtype=np.float32)
-        for i, (iy, ix) in enumerate(idx_map):
-            val = mag_vals[i]
-            u_over_uref = float(df['U_over_Uref'].iloc[i])
-            delta_u = (val - u_over_uref) / (u_over_uref + 1e-6)
-            delta_u = np.clip(delta_u, -1.5, 2.0) 
-            Y_grid[0, iy, ix] = float(delta_u)
-            sdf_val = max(float(df['SDF'].iloc[i]), 0.0)
-            # FIX: reduced mask ceiling from 20x to 5x
-            sdf_w = 1.0 + 4.0 * np.exp(-sdf_val / 5.0)
-            mask_grid[0, iy, ix] = sdf_w
-        return (X_tensor.squeeze(0), torch.from_numpy(Y_grid), torch.from_numpy(mask_grid), chs), None
-    except Exception as e: return None, f"Error processing {fp}: {e}"
-
-def get_cache_hash(files):
-    hash_parts = [f"files:{len(files)}", "hybrid_v1"]
-    for f in files[::10]: hash_parts.append(f"{os.path.basename(f)}_{os.path.getmtime(f):.0f}")
-    return hashlib.md5("|".join(hash_parts).encode()).hexdigest()
-
-def load_or_prepare_dataset(files, rank, is_main, num_workers):
-    cache_hash = get_cache_hash(files)
-    cache_path = f"dataset_cache_hybrid_{cache_hash}.pkl"
-    if os.path.exists(cache_path):
-        if is_main: print(f"Loading cached dataset from {cache_path}...")
-        with open(cache_path, 'rb') as f: return pickle.load(f)
-    if is_main: print(f"Preparing dataset using {num_workers} workers...")
-    with Pool(num_workers) as pool:
-        results = list(tqdm(pool.imap(process_single_file, files), total=len(files))) if is_main else list(pool.imap(process_single_file, files))
-    Xs, Ys, Masks, chs = [], [], [], None
-    for res, err in results:
-        if err: continue
-        X, Y, M, c = res
-        Xs.append(X); Ys.append(Y); Masks.append(M)
-        if chs is None: chs = c
-    if is_main:
-        with open(cache_path, 'wb') as f: pickle.dump((Xs, Ys, Masks, chs), f)
-    return Xs, Ys, Masks, chs
-
-class HybridNumpyDataset(torch.utils.data.Dataset):
-    """
-    Lazy-loading dataset for large mmap'd Numpy arrays.
-    Prevents OOM by only loading batches into RAM.
-    """
-    def __init__(self, x_path, y_path, sdf_scaling):
-        self.x_mmap = np.load(x_path, mmap_mode='c')
-        self.y_mmap = np.load(y_path, mmap_mode='c')
-        self.sdf_scaling = sdf_scaling
-        
-    def __len__(self):
-        return self.x_mmap.shape[0]
-        
-    def __getitem__(self, idx):
-        # We use .copy() to get an owned array that Pytorch can convert to a tensor properly
-        x = torch.from_numpy(self.x_mmap[idx].copy()).float()
-        y = torch.from_numpy(self.y_mmap[idx].copy()).float()
-        
-        # Compute mask on-the-fly (Fast for a single sample)
-        # SDF is channel 0
-        sdf_meters = x[0:1, :, :] * self.sdf_scaling
-        mask = 1.0 + 19.0 * torch.exp(-torch.clamp(sdf_meters, min=0.0) / 5.0)
-        
-        return x, y, mask
 
 # ============ Main Training ============
 def main():
@@ -255,44 +147,22 @@ def main():
             os.makedirs(EPOCHS_DIR, exist_ok=True)
             os.makedirs("training_logs", exist_ok=True)
 
-        # 3. Data Prep (Priority: Scratch folder for speed)
-        paths_to_check = [
-            "/home/hice1/athach7/scratch/Training_Dataset",
-            DATA_FOLDER # Fallback from config.toml
-        ]
+        # 3. Data Prep
+        x_path = os.path.join(DATA_FOLDER, 'X.npy')
+        y_path = os.path.join(DATA_FOLDER, 'Y.npy')
         
-        found_data = False
-        for p in paths_to_check:
-            x_npy, y_npy = os.path.join(p, "X.npy"), os.path.join(p, "Y.npy")
-            if os.path.exists(x_npy) and os.path.exists(y_npy):
-                if is_main_process(rank): print(f"LOADING PRE-PROCESSED: {p}", flush=True)
-                # Note: 'c' mode is copy-on-write, very fast for multiple GPUs
-                temp_x = np.load(x_npy, mmap_mode='r')
-                sdf_max = temp_x[0, 0].max()
-                sdf_scaling = 200.0 if sdf_max <= 5.0 else 1.0 # Auto-detect normalization
-                dataset = HybridNumpyDataset(x_npy, y_npy, sdf_scaling)
-                found_data = True
-                break
-        
-        if not found_data:
-            if is_main_process(rank):
-                print(f"Falling back to CSV/NPZ loading (Memory Intensive)...", flush=True)
-            files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.csv"), recursive=True))
-            if not files:
-                files = sorted(glob.glob(os.path.join(DATA_FOLDER, "**/*.npz"), recursive=True))
-            if not files: raise RuntimeError(f"No CSV or NPZ data found in {DATA_FOLDER}")
-            num_workers = max(1, cpu_count() // 2)
-            Xs, Ys, Masks, _ = load_or_prepare_dataset(files, rank, is_main_process(rank), num_workers)
-            max_h = max(t.shape[1] for t in Xs); max_w = max(t.shape[2] for t in Xs)
-            def pad(t_list):
-                return torch.stack([torch.nn.functional.pad(t, (0, max_w-t.shape[2], 0, max_h-t.shape[1])) for t in t_list])
-            dataset = TensorDataset(pad(Xs), pad(Ys), pad(Masks))
+        if is_main_process(rank):
+            print(f"Loading dataset from {DATA_FOLDER}...")
+            print(f"  X path: {x_path}")
+            print(f"  Y path: {y_path}")
+            
+        dataset = NpyDataset(x_path, y_path, augment=True)
         
         sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank) if is_distributed else None
         loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, shuffle=(sampler is None), num_workers=2 if not is_distributed else 1)
 
         # 4. Model & Optimization
-        sample_x, _, _ = dataset[0]
+        sample_x, _ = dataset[0]
         model = HybridFNO(in_channels=sample_x.shape[0], 
                           n_modes=(MODES1, MODES2),
                           hidden_channels=WIDTH).to(device)
@@ -323,8 +193,14 @@ def main():
             if is_distributed: sampler.set_epoch(epoch)
             model.train()
             running_loss = 0.0
-            for xb, yb, mb in loader:
-                xb, yb, mb = xb.to(device), yb.to(device), mb.to(device)
+            for batch in loader:
+                xb, yb = batch
+                xb, yb = xb.to(device), yb.to(device)
+                
+                # Build mask from SDF channel (Channel 0, physically normalized: SDF/200)
+                sdf = xb[:, 0:1, :, :]
+                mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+                
                 pred = model(xb)
                 
                 # FIX: use epoch-dependent warmup weights
