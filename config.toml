@@ -22,18 +22,18 @@ checkpoint_interval = 10
 
 [model]
 # Sufficient modes to capture narrow building wakes
-modes1 = 32
-modes2 = 32
-width = 64
+modes1 = 48
+modes2 = 48
+width = 128
 n_layers = 4
 
 [loss]
 # Balanced with MSE to allow features to emerge
-gradient_weight   = 0.15
-spectral_weight   = 0.01
+gradient_weight   = 1.5
+spectral_weight   = 0.001
 peak_weight       = 0.5
-wake_weight       = 0.5
-warmup_epochs     = 50     # Keep early training stable
+wake_weight       = 1.0
+warmup_epochs     = 10     # Drop warmup so physics kicks in early
 
 # PINN-specific physics constraints
 continuity_weight = 1.0    # Increased to enforce ∇·u ≈ 0

@@ -16,17 +16,17 @@ patience = 50
 checkpoint_interval = 1
 
 [model]
-modes1 = 32
-modes2 = 32
-width = 64
+modes1 = 48
+modes2 = 48
+width = 128
 n_layers = 4
 
 [loss]
-gradient_weight   = 0.0
-spectral_weight   = 0.0
-peak_weight       = 0.0
-wake_weight       = 0.0
-warmup_epochs     = 1
+gradient_weight   = 1.5
+spectral_weight   = 0.001
+peak_weight       = 0.5
+wake_weight       = 1.0
+warmup_epochs     = 10
 
 [performance]
 num_workers = 4
@@ -34,4 +34,4 @@ num_workers = 4
 [ice]
 account = "coc"
 partition = ""
-walltime = "04:00:00"
+walltime = "10:00:00"
