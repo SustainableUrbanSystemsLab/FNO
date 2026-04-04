@@ -1,5 +1,5 @@
 """
-Distributed Training for Hybrid FNO Model
+Distributed Training for Geometry-Aware FNO (GeoFNO) Model
 =========================================
 Features:
 - PyTorch Distributed Data Parallel (DDP)
@@ -21,7 +21,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'
 
 # Local imports
 from core.models.fno2d import FNO2d, sensor_weighted_mse
-from core.models.hybrid import HybridFNO
+from core.models.geo_fno import GeoFNO
 from core.utils.training_logger import TrainingLogger
 from neuralop.losses import LpLoss, H1Loss
 
@@ -115,7 +115,7 @@ def main():
             print(f"Using Data Folder: {os.path.abspath(DATA_FOLDER)}", flush=True)
 
         # 2. Config & Training Params
-        MODEL_OUT = "hybrid_fno_weights.pth"
+        MODEL_OUT = "geo_fno_weights.pth"
         BATCH = config.get('training', {}).get('batch_size', 4)
         EPOCHS = config.get('training', {}).get('epochs', 1000)
         LR = config.get('training', {}).get('learning_rate', 5e-4)
@@ -163,7 +163,7 @@ def main():
 
         # 4. Model & Optimization
         sample_x, _ = dataset[0]
-        model = HybridFNO(in_channels=sample_x.shape[0], 
+        model = GeoFNO(in_channels=sample_x.shape[0], 
                           n_modes=(MODES1, MODES2),
                           hidden_channels=WIDTH).to(device)
         
@@ -236,7 +236,7 @@ def main():
                     print(f"   * Best model saved (Loss: {best_loss:.6e})", flush=True)
 
                 if epoch % CHECKPOINT_INTERVAL == 0:
-                    ckpt_path = os.path.join(EPOCHS_DIR, "rolling_hybrid_checkpoint.pth")
+                    ckpt_path = os.path.join(EPOCHS_DIR, "rolling_geo_checkpoint.pth")
                     temp_ckpt = ckpt_path + ".tmp"
                     torch.save(model.module.state_dict() if is_distributed else model.state_dict(), temp_ckpt)
                     if os.path.exists(ckpt_path): os.remove(ckpt_path)

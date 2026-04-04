@@ -211,7 +211,10 @@ def main():
                     best_loss = avg_loss
                     patience_count = 0
                     sd = model.module.state_dict() if is_distributed else model.state_dict()
-                    torch.save(sd, MODEL_OUT)
+                    temp_out = MODEL_OUT + ".tmp"
+                    torch.save(sd, temp_out)
+                    if os.path.exists(MODEL_OUT): os.remove(MODEL_OUT)
+                    os.rename(temp_out, MODEL_OUT)
                     print(f"  ★ Best model saved (loss={best_loss:.4e})", flush=True)
                 else:
                     patience_count += 1
@@ -221,8 +224,11 @@ def main():
 
                 if epoch % CKPT_INT == 0:
                     sd = model.module.state_dict() if is_distributed else model.state_dict()
-                    ckpt = os.path.join(EPOCHS_DIR, f'pinn_epoch_{epoch}.pth')
-                    torch.save(sd, ckpt)
+                    ckpt = os.path.join(EPOCHS_DIR, 'pinn_rolling_checkpoint.pth')
+                    temp_ckpt = ckpt + ".tmp"
+                    torch.save(sd, temp_ckpt)
+                    if os.path.exists(ckpt): os.remove(ckpt)
+                    os.rename(temp_ckpt, ckpt)
                     print(f"  > Checkpoint: {ckpt}", flush=True)
 
     except Exception as e:

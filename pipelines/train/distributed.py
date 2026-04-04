@@ -550,11 +550,6 @@ def main():
                 }
                 torch.save(checkpoint, CHECKPOINT_PATH)
                 print(f"  > Latest checkpoint saved to {CHECKPOINT_PATH}")
-                
-                # Also save epoch-specific checkpoint for safety
-                epoch_ckpt = os.path.join(EPOCHS_DIR, f"checkpoint_epoch_{epoch}.pth")
-                torch.save(checkpoint, epoch_ckpt)
-                print(f"  > Epoch checkpoint saved to {epoch_ckpt}")
 
             # Early stopping
             # CRITICAL FIX: All ranks must track patience and decide to stop together.
