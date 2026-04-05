@@ -146,7 +146,42 @@ def run_comparison(data_path, sample_idx, out_image="model_comparison.png", save
             
         p_mag[~valid_mask] = 0.0
         predictions[name] = p_mag
-        metrics_map[name] = analyze_prediction_quality(p_mag, target_mag)
+        
+        has_data = valid_mask
+        if has_data.sum() > 0:
+            ss_res = np.sum((target_mag[has_data] - p_mag[has_data]) ** 2)
+            ss_tot = np.sum((target_mag[has_data] - np.mean(target_mag[has_data])) ** 2)
+            r2_score = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+            
+            mape_score = np.mean(np.abs((target_mag[has_data] - p_mag[has_data]) / (target_mag[has_data] + 1e-8))) * 100.0
+            
+            px, py = np.gradient(p_mag, axis=1), np.gradient(p_mag, axis=0)
+            tx, ty = np.gradient(target_mag, axis=1), np.gradient(target_mag, axis=0)
+            pmag_grad = np.sqrt(px**2 + py**2)
+            tmag_grad = np.sqrt(tx**2 + ty**2)
+            
+            gcov = np.cov(pmag_grad[has_data], tmag_grad[has_data])[0, 1]
+            gstd = np.std(pmag_grad[has_data]) * np.std(tmag_grad[has_data])
+            grad_corr = gcov / gstd if gstd > 1e-8 else 0.0
+            
+            try:
+                from skimage.metrics import structural_similarity
+                rng = target_mag[has_data].max() - target_mag[has_data].min()
+                ssim_score = structural_similarity(target_mag, p_mag, data_range=rng)
+            except ImportError:
+                ssim_score = -1.0
+        else:
+            r2_score = 0.0
+            mape_score = 0.0
+            grad_corr = 0.0
+            ssim_score = 0.0
+            
+        mets = analyze_prediction_quality(p_mag, target_mag)
+        mets['r2'] = r2_score
+        mets['mape'] = mape_score
+        mets['grad_corr'] = grad_corr
+        mets['ssim'] = ssim_score
+        metrics_map[name] = mets
 
     if not predictions:
         print("No models found! Train them first.")
@@ -158,7 +193,12 @@ def run_comparison(data_path, sample_idx, out_image="model_comparison.png", save
     print("="*50)
     for name, mets in metrics_map.items():
         print(f"--- {name.upper()} ---")
+        print(f"R-squared (R^2):  {mets['r2']:.4f}")
+        print(f"SSIM:             {mets['ssim']:.4f}")
+        print(f"Gradient Corr:    {mets['grad_corr']:.4f}")
         print(f"Overall MAE:      {mets['overall_mae']:.4f}")
+        print(f"Overall RMSE:     {mets['overall_rmse']:.4f}")
+        print(f"overall MAPE:     {mets['mape']:.2f}%")
         print(f"Wake Region MAE:  {mets['wake_mae']:.4f}")
         print(f"Peak Region MAE:  {mets['peak_mae']:.4f}")
         print(f"Gradient Error:   {mets['grad_mae']:.4f} \n")
@@ -169,7 +209,12 @@ def run_comparison(data_path, sample_idx, out_image="model_comparison.png", save
         f.write("Target Data: " + data_path + f" (Sample {sample_idx})\n\n")
         for name, mets in metrics_map.items():
             f.write(f"--- {name} ---\n")
+            f.write(f"R-squared:   {mets['r2']:.4f}\n")
+            f.write(f"SSIM:        {mets['ssim']:.4f}\n")
+            f.write(f"Grad Corr:   {mets['grad_corr']:.4f}\n")
             f.write(f"Overall MAE: {mets['overall_mae']:.4f}\n")
+            f.write(f"overall RMSE:{mets['overall_rmse']:.4f}\n")
+            f.write(f"overall MAPE:{mets['mape']:.2f}%\n")
             f.write(f"Wake MAE:    {mets['wake_mae']:.4f}\n")
             f.write(f"Peak MAE:    {mets['peak_mae']:.4f}\n")
             f.write(f"Grad Error:  {mets['grad_mae']:.4f}\n\n")
@@ -212,10 +257,14 @@ def run_comparison(data_path, sample_idx, out_image="model_comparison.png", save
         axes[2, idx].axis('off')
         textstr = '\n'.join((
             "METRICS:",
-            f"Sys MAE: {metrics['overall_mae']:.4f}",
-            f"Wake MAE: {metrics['wake_mae']:.4f}",
-            f"Peak MAE: {metrics['peak_mae']:.4f}",
-            f"Grad MAE: {metrics['grad_mae']:.4f}"
+            f"R^2 Score: {metrics['r2']:.3f}",
+            f"SSIM: {metrics['ssim']:.3f}",
+            f"Grad Corr: {metrics['grad_corr']:.3f}",
+            f"Sys MAE: {metrics['overall_mae']:.3f}",
+            f"Sys RMSE: {metrics['overall_rmse']:.3f}",
+            f"Sys MAPE: {metrics['mape']:.1f}%",
+            f"Wake MAE: {metrics['wake_mae']:.3f}",
+            f"Peak MAE: {metrics['peak_mae']:.3f}"
         ))
         axes[2, idx].text(0.1, 0.5, textstr, transform=axes[2, idx].transAxes, 
                           fontsize=12, verticalalignment='center')
