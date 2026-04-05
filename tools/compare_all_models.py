@@ -153,7 +153,11 @@ def run_comparison(data_path, sample_idx, out_image="model_comparison.png", save
             ss_tot = np.sum((target_mag[has_data] - np.mean(target_mag[has_data])) ** 2)
             r2_score = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
             
-            mape_score = np.mean(np.abs((target_mag[has_data] - p_mag[has_data]) / (target_mag[has_data] + 1e-8))) * 100.0
+            mape_mask = (valid_mask) & (target_mag > 0.1)
+            if mape_mask.sum() > 0:
+                mape_score = np.mean(np.abs((target_mag[mape_mask] - p_mag[mape_mask]) / target_mag[mape_mask])) * 100.0
+            else:
+                mape_score = 0.0
             
             px, py = np.gradient(p_mag, axis=1), np.gradient(p_mag, axis=0)
             tx, ty = np.gradient(target_mag, axis=1), np.gradient(target_mag, axis=0)
@@ -201,7 +205,7 @@ def run_comparison(data_path, sample_idx, out_image="model_comparison.png", save
         print(f"overall MAPE:     {mets['mape']:.2f}%")
         print(f"Wake Region MAE:  {mets['wake_mae']:.4f}")
         print(f"Peak Region MAE:  {mets['peak_mae']:.4f}")
-        print(f"Gradient Error:   {mets['grad_mae']:.4f} \n")
+        print(f"Gradient Error:   {mets['gradient_mae']:.4f} \n")
 
     # Write textual summary to file
     with open(save_metrics, "w") as f:
@@ -217,7 +221,7 @@ def run_comparison(data_path, sample_idx, out_image="model_comparison.png", save
             f.write(f"overall MAPE:{mets['mape']:.2f}%\n")
             f.write(f"Wake MAE:    {mets['wake_mae']:.4f}\n")
             f.write(f"Peak MAE:    {mets['peak_mae']:.4f}\n")
-            f.write(f"Grad Error:  {mets['grad_mae']:.4f}\n\n")
+            f.write(f"Grad Error:  {mets['gradient_mae']:.4f}\n\n")
 
     # 4. PLOTTING VISUAL COMPARISON
     num_plots = len(predictions) + 1
@@ -264,7 +268,8 @@ def run_comparison(data_path, sample_idx, out_image="model_comparison.png", save
             f"Sys RMSE: {metrics['overall_rmse']:.3f}",
             f"Sys MAPE: {metrics['mape']:.1f}%",
             f"Wake MAE: {metrics['wake_mae']:.3f}",
-            f"Peak MAE: {metrics['peak_mae']:.3f}"
+            f"Peak MAE: {metrics['peak_mae']:.3f}",
+            f"Grad MAE: {metrics['gradient_mae']:.3f}"
         ))
         axes[2, idx].text(0.1, 0.5, textstr, transform=axes[2, idx].transAxes, 
                           fontsize=12, verticalalignment='center')
