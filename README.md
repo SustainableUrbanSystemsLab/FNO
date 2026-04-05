@@ -1,4 +1,4 @@
-# Accelerated Fourier Neural Operators for Urban Wind Wakes
+#  Fourier Neural Operators for Urban Wind Wakes
 
 This repository contains a highly specialized, massively parallelized machine learning ecosystem dedicated to predicting High-Fidelity urban wind aerodynamics. 
 
