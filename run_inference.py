@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""
+Universal FNO Inference CLI
+============================
+Reads a Grasshopper CSV file, runs it through the requested FNO Scenario 
+(Standard, Hybrid, PINN, Geo), and exports the exact identical Point-Cloud CSV 
+and a High-Fidelity 4-Panel Visualization.
+
+Usage:
+  python run_inference.py --scenario GEO --csv test_csv/ML_FormFlux_1_135.csv
+"""
+import os
+import sys
+import argparse
+import torch
+import glob
+
+# Ensure the tools directory is recognized so we can reuse the 4-panel inference logic
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+from tools.infer_csv import process_single_csv, load_weights, build_model
+
+SCENARIOS = {
+    "STANDARD": {
+        "name": "Standard FNO",
+        "checkpoint": "fno_test_weights.pth",
+        "type": "standard",
+        "desc": "Baseline High-Resolution Fourier Operator"
+    },
+    "HYBRID": {
+        "name": "Hybrid U-FNO",
+        "checkpoint": "hybrid_fno_weights.pth",
+        "type": "hybrid",
+        "desc": "Fourier Operator wrapped in L1 Boundary Convolutional Skips"
+    },
+    "PINN": {
+        "name": "Strict PINN-FNO",
+        "checkpoint": "pinn_fno_weights.pth",
+        "type": "pinn",
+        "desc": "FNO bounded by explicit Navier-Stokes Mass & Momentum tracking"
+    },
+    "GEO": {
+        "name": "Geometric Latent FNO",
+        "checkpoint": "geo_fno_weights.pth",
+        "type": "geo",
+        "desc": "Boundary-warped Fourier operator evaluating in latent space"
+    }
+}
+
+def main():
+    parser = argparse.ArgumentParser(description="Universal FNO Inference CLI")
+    parser.add_argument("--scenario", type=str, choices=list(SCENARIOS.keys()), required=True, help="Scenario to run")
+    parser.add_argument("--csv", type=str, required=True, help="Input CSV file or directory of CSVs")
+    parser.add_argument("--output_dir", type=str, default="results/inference", help="Target directory for results")
+    parser.add_argument("--checkpoint", type=str, default=None, help="Override default checkpoint path for this scenario")
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    
+    args = parser.parse_args()
+    conf = SCENARIOS[args.scenario]
+    ckpt_path = args.checkpoint if args.checkpoint else conf["checkpoint"]
+    device = torch.device(args.device)
+
+    print(f"\n>>> Running FNO Inference: {conf['name']}")
+    print(f">>> Scenario Info: {conf['desc']}")
+    print(f">>> Expected Checkpoint: {ckpt_path}")
+    print(f">>> Hardware Device: {device}\n")
+
+    if not os.path.exists(ckpt_path):
+        print(f"Error: Could not find exactly '{ckpt_path}'. Put your trained model here or use --checkpoint to point to it.")
+        sys.exit(1)
+
+    # 1. Load Model Framework
+    state_dict = load_weights(ckpt_path, device)
+    model = build_model(conf["type"], state_dict, device)
+
+    # 2. Process Data dynamically
+    os.makedirs(args.output_dir, exist_ok=True)
+    if os.path.isdir(args.csv):
+        files = glob.glob(os.path.join(args.csv, "*.csv"))
+        files = [f for f in files if "_pred" not in os.path.basename(f)]
+        for f in files: 
+            process_single_csv(f, model, device, args.output_dir)
+    else:
+        process_single_csv(args.csv, model, device, args.output_dir)
+        
+    print(f"\nDone! Results successfully populated in -> {args.output_dir}")
+
+if __name__ == "__main__":
+    main()
