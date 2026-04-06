@@ -280,7 +280,7 @@ def run_comparison(data_path, sample_idx, out_image="model_comparison.png", save
             rad = np.radians(angle_deg)
             ax.plot([cx, cx + R * np.cos(rad)], [cy, cy + R * np.sin(rad)], color="#d0d0d0", linewidth=0.4, zorder=1)
 
-        bldg_mask = x_input[4] > 0
+        bldg_mask = x_input[1] > 0
         if np.any(bldg_mask):
             bldg_rgba = np.zeros((H, W, 4), dtype=np.float32)
             bldg_rgba[bldg_mask] = [0.15, 0.15, 0.15, 1.0]

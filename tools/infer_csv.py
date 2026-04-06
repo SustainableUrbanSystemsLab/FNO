@@ -40,7 +40,7 @@ def plot_domain_panel(ax, x_input):
         rad = np.radians(angle_deg)
         ax.plot([cx, cx + R * np.cos(rad)], [cy, cy + R * np.sin(rad)], color="#d0d0d0", linewidth=0.4, zorder=1)
 
-    bldg_mask = x_input[4] > 0
+    bldg_mask = x_input[1] > 0
     if np.any(bldg_mask):
         bldg_rgba = np.zeros((H, W, 4), dtype=np.float32)
         bldg_rgba[bldg_mask] = [0.15, 0.15, 0.15, 1.0]
@@ -108,9 +108,38 @@ def save_pred_vs_true(y_pred, y_true, out_path, x_input):
     rmse = np.sqrt(np.mean(diff_m**2))
     valid_mape = np.abs(y_true[dm]) > 0.1
     mape = np.mean(abs_m[valid_mape] / np.abs(y_true[dm][valid_mape])) * 100.0 if np.any(valid_mape) else 0.0
+    
+    # Advanced Metrics (R^2, SSIM, GradCorr)
+    gt_m = y_true[dm]
+    ss_res = np.sum(diff_m ** 2)
+    ss_tot = np.sum((gt_m - np.mean(gt_m)) ** 2)
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-12 else 0.0
+
+    try:
+        from skimage.metrics import structural_similarity
+        ssim_val = structural_similarity(y_true, y_pred, data_range=max(y_true.max(), y_pred.max()) - min(y_true.min(), y_pred.min()))
+        ssim_str = f"{ssim_val:.3f}"
+    except ImportError:
+        ssim_str = "N/A"
+
+    def _grad_corr(pred, true, mask):
+        pdx = np.diff(pred, axis=1, prepend=pred[:, :1])
+        pdy = np.diff(pred, axis=0, prepend=pred[:1, :])
+        tdx = np.diff(true, axis=1, prepend=true[:, :1])
+        tdy = np.diff(true, axis=0, prepend=true[:1, :])
+        pg = np.concatenate([pdx.flatten(), pdy.flatten()])
+        tg = np.concatenate([tdx.flatten(), tdy.flatten()])
+        mm = np.concatenate([mask.flatten(), mask.flatten()])
+        pg, tg = pg[mm], tg[mm]
+        if np.std(pg) < 1e-8 or np.std(tg) < 1e-8: return 0.0
+        return np.corrcoef(pg, tg)[0, 1]
+
+    grad_corr = _grad_corr(y_pred, y_true, dm)
 
     line1 = f"MAE:{mae:.3f} | RMSE:{rmse:.3f} | MAPE:{mape:.1f}%"
-    fig.text(ax3.get_position().x0 + ax3.get_position().width/2, ax1.get_position().y0 - 0.22, f"{line1}", ha="center", fontsize=10, family="monospace", bbox=dict(boxstyle="round", facecolor="white", alpha=0.85))
+    line2 = f"SSIM:{ssim_str} | GradCorr:{grad_corr:.3f} | R²:{r2:.3f}"
+    
+    fig.text(ax3.get_position().x0 + ax3.get_position().width/2, ax1.get_position().y0 - 0.22, f"{line1}\n{line2}", ha="center", fontsize=10, family="monospace", bbox=dict(boxstyle="round", facecolor="white", alpha=0.85))
 
     cax_shared = fig.add_axes([ax1.get_position().x0 + ax1.get_position().width/2, ax1.get_position().y0 - 0.12, ax3.get_position().width, 0.025])
     fig.colorbar(im1, cax=cax_shared, orientation="horizontal")
