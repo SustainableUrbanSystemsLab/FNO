@@ -1,8 +1,8 @@
-# Accelerated Fourier Neural Operators for Urban Wind Wakes
+#  Fourier Neural Operators for Urban Wind Wakes
 
 This repository contains a highly specialized, massively parallelized machine learning ecosystem dedicated to predicting High-Fidelity urban wind aerodynamics. 
 
-It is designed to solve **The Fourier Wake Blurring Problem (Gibbs Phenomenon)**—a critical mathematical flaw where standard FNOs naturally blur and fail to capture the sharp boundaries of aerodynamic wakes behind large physical structures. To solve this, this repository contains **four distinct cutting-edge architectures**, a unified memory-mapped cluster pipeline, and a comprehensive mathematical diagnostic suite.
+It is designed to solve **The Fourier Wake Blurring Problem (Gibbs Phenomenon)**—a critical mathematical flaw where standard FNOs naturally blur and fail to capture the sharp boundaries of aerodynamic wakes behind large physical structures. To solve this, this repository contains **four distinct architectures**, a unified memory-mapped cluster pipeline, and a comprehensive mathematical diagnostic suite.
 
 ---
 
