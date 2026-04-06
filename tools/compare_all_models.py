@@ -147,26 +147,42 @@ def run_comparison(data_path, sample_idx, out_image="model_comparison.png", save
         p_mag[~valid_mask] = 0.0
         predictions[name] = p_mag
         
-        has_data = valid_mask
+        # Implement Pix2PixHD strict circular domain mask constraint
+        H_grid, W_grid = target_mag.shape
+        cy_m, cx_m = H_grid // 2, W_grid // 2
+        rad_m = min(H_grid, W_grid) // 2 - 5
+        Yc_m, Xc_m = np.ogrid[:H_grid, :W_grid]
+        outside = np.sqrt((Xc_m - cx_m)**2 + (Yc_m - cy_m)**2) >= rad_m
+        
+        # Override valid_mask with rigorous circular inner-domain
+        has_data = valid_mask & (~outside)
+        
         if has_data.sum() > 0:
             ss_res = np.sum((target_mag[has_data] - p_mag[has_data]) ** 2)
             ss_tot = np.sum((target_mag[has_data] - np.mean(target_mag[has_data])) ** 2)
             r2_score = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
             
-            mape_mask = (valid_mask) & (target_mag > 0.1)
+            mape_mask = (has_data) & (target_mag > 0.1)
             if mape_mask.sum() > 0:
                 mape_score = np.mean(np.abs((target_mag[mape_mask] - p_mag[mape_mask]) / target_mag[mape_mask])) * 100.0
             else:
                 mape_score = 0.0
             
-            px, py = np.gradient(p_mag, axis=1), np.gradient(p_mag, axis=0)
-            tx, ty = np.gradient(target_mag, axis=1), np.gradient(target_mag, axis=0)
-            pmag_grad = np.sqrt(px**2 + py**2)
-            tmag_grad = np.sqrt(tx**2 + ty**2)
-            
-            gcov = np.cov(pmag_grad[has_data], tmag_grad[has_data])[0, 1]
-            gstd = np.std(pmag_grad[has_data]) * np.std(tmag_grad[has_data])
-            grad_corr = gcov / gstd if gstd > 1e-8 else 0.0
+            # Match exact Grad Corr from Conditional Transformer (Directional Flat)
+            def _grad_corr(pred, true, mask):
+                pdx = np.diff(pred, axis=1, prepend=pred[:, :1])
+                pdy = np.diff(pred, axis=0, prepend=pred[:1, :])
+                tdx = np.diff(true, axis=1, prepend=true[:, :1])
+                tdy = np.diff(true, axis=0, prepend=true[:1, :])
+                pg = np.concatenate([pdx.flatten(), pdy.flatten()])
+                tg = np.concatenate([tdx.flatten(), tdy.flatten()])
+                mm = np.concatenate([mask.flatten(), mask.flatten()])
+                pg, tg = pg[mm], tg[mm]
+                if np.std(pg) < 1e-8 or np.std(tg) < 1e-8:
+                    return 0.0
+                return np.corrcoef(pg, tg)[0, 1]
+
+            grad_corr = _grad_corr(p_mag, target_mag, has_data)
             
             try:
                 from skimage.metrics import structural_similarity
