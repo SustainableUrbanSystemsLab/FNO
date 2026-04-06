@@ -202,7 +202,7 @@ def process_single_csv(csv_path, model, DEVICE, output_dir=None):
     
     # 1. SAVE CSV
     df_out = df.copy()
-    df_out['mag_U'] = p_mag_flat  # Overwrite or append exact predicted column
+    df_out['mag_U_pred'] = p_mag_flat  # Use exact same column header as CT
     
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
