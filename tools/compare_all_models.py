@@ -1,5 +1,6 @@
 import os, sys, torch, numpy as np, pandas as pd, matplotlib.pyplot as plt, tomllib
 import argparse
+import matplotlib.patches as mpatches
 from matplotlib.colors import TwoSlopeNorm
 
 # Add project root to sys.path
@@ -240,7 +241,7 @@ def run_comparison(data_path, sample_idx, out_image="model_comparison.png", save
             f.write(f"Grad Error:  {mets['gradient_mae']:.4f}\n\n")
 
     # 4. PLOTTING VISUAL COMPARISON
-    num_plots = len(predictions) + 1
+    num_plots = len(predictions) + 2
     fig, axes = plt.subplots(3, num_plots, figsize=(4.5 * num_plots, 10))
     fig.subplots_adjust(wspace=0.15, hspace=0.25)
     
@@ -255,17 +256,70 @@ def run_comparison(data_path, sample_idx, out_image="model_comparison.png", save
             im = ax.imshow(field, origin='lower', cmap='RdBu_r', norm=norm_diff)
         else:
             im = ax.imshow(field, origin='lower', cmap=cmap_wind, vmin=0, vmax=vmax, alpha=0.85)
-        ax.set_title(title)
+        ax.set_title(title, pad=15, fontsize=14, fontweight="bold", bbox=dict(boxstyle="round,pad=0.3", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
         ax.axis('off')
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    # Plot Ground Truth
-    plot_field(axes[0, 0], target_mag, "Ground Truth (CFD)")
+    def _plot_domain(ax, x_input):
+        H, W = x_input.shape[1], x_input.shape[2]
+        cx, cy = W // 2, H // 2
+        R = min(H, W) // 2 - 5
+        sin_val, cos_val = float(x_input[6].mean()), float(x_input[7].mean())
+        mag = np.sqrt(sin_val**2 + cos_val**2)
+        if mag < 1e-6: sin_val, cos_val = 1.0, 0.0
+        wind_dir_deg = np.degrees(np.arctan2(cos_val, sin_val))
+        inlet_center_deg = (wind_dir_deg + 180) % 360
+
+        ax.set_facecolor("white")
+        ax.set_xlim(0, W); ax.set_ylim(0, H)
+        ax.set_aspect("equal")
+
+        for i in range(1, 8):
+            ax.add_patch(plt.Circle((cx, cy), R * i / 7, fill=False, edgecolor="#d0d0d0", linewidth=0.4, zorder=1))
+        for angle_deg in range(0, 360, 30):
+            rad = np.radians(angle_deg)
+            ax.plot([cx, cx + R * np.cos(rad)], [cy, cy + R * np.sin(rad)], color="#d0d0d0", linewidth=0.4, zorder=1)
+
+        bldg_mask = x_input[4] > 0
+        if np.any(bldg_mask):
+            bldg_rgba = np.zeros((H, W, 4), dtype=np.float32)
+            bldg_rgba[bldg_mask] = [0.15, 0.15, 0.15, 1.0]
+            ax.imshow(bldg_rgba, origin="lower", extent=[0, W, 0, H], zorder=2)
+            ys, xs = np.where(bldg_mask)
+            gan_r = np.clip(np.sqrt(((xs - cx)**2 + (ys - cy)**2).max()) * 1.15, R * 0.35, R * 0.85)
+        else: gan_r = R * 0.6
+            
+        ax.add_patch(plt.Circle((cx, cy), gan_r, fill=False, edgecolor="goldenrod", linestyle="--", linewidth=1.5, zorder=3))
+        ax.add_patch(mpatches.Arc((cx, cy), R * 2, R * 2, angle=0, theta1=inlet_center_deg-90, theta2=inlet_center_deg+90, edgecolor="royalblue", linewidth=2.5, fill=False, zorder=4))
+        ax.add_patch(mpatches.Arc((cx, cy), R * 2, R * 2, angle=0, theta1=wind_dir_deg-90, theta2=wind_dir_deg+90, edgecolor="red", linewidth=2.5, fill=False, zorder=4))
+
+        mid_angle = np.radians(inlet_center_deg)
+        dx_arrow, dy_arrow = -28 * np.cos(mid_angle), -28 * np.sin(mid_angle)
+        for i in range(9):
+            frac = (i + 0.5) / 9
+            angle = np.radians(inlet_center_deg - 90 + frac * 180)
+            x_arr, y_arr = cx + R * np.cos(angle), cy + R * np.sin(angle)
+            ax.annotate("", xy=(x_arr + dx_arrow, y_arr + dy_arrow), xytext=(x_arr, y_arr), arrowprops=dict(arrowstyle="->", color="royalblue", lw=1.3), zorder=5)
+
+        ax.text(cx + (R+22)*np.cos(np.radians(inlet_center_deg+45)), cy + (R+22)*np.sin(np.radians(inlet_center_deg+45)), "inlet", color="royalblue", fontweight="bold", bbox=dict(boxstyle="round", facecolor="white", edgecolor="none", alpha=0.8))
+        ax.text(cx + (R+22)*np.cos(np.radians(wind_dir_deg+45)), cy + (R+22)*np.sin(np.radians(wind_dir_deg+45)), "outlet", color="red", fontweight="bold", bbox=dict(boxstyle="round", facecolor="white", edgecolor="none", alpha=0.8))
+        
+        ax.set_title("Domain Setup", pad=15, fontsize=14, fontweight="bold", bbox=dict(boxstyle="round,pad=0.3", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
+        ax.set_xticks([]); ax.set_yticks([])
+        for sp in ax.spines.values(): sp.set_visible(False)
+
+    # Plot Domain Setup
+    _plot_domain(axes[0, 0], X_batch[0].cpu().numpy())
     axes[1, 0].axis('off')
     axes[2, 0].axis('off')
 
+    # Plot Ground Truth
+    plot_field(axes[0, 1], target_mag, "Ground Truth (CFD)")
+    axes[1, 1].axis('off')
+    axes[2, 1].axis('off')
+
     # Plot Model Results
-    idx = 1
+    idx = 2
     for name, p_mag in predictions.items():
         diff = p_mag - target_mag
         metrics = metrics_map[name]
