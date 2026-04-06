@@ -139,13 +139,28 @@ def save_pred_vs_true(y_pred, y_true, out_path, x_input):
     line1 = f"MAE:{mae:.3f} | RMSE:{rmse:.3f} | MAPE:{mape:.1f}%"
     line2 = f"SSIM:{ssim_str} | GradCorr:{grad_corr:.3f} | R²:{r2:.3f}"
     
-    fig.text(ax3.get_position().x0 + ax3.get_position().width/2, ax1.get_position().y0 - 0.22, f"{line1}\n{line2}", ha="center", fontsize=10, family="monospace", bbox=dict(boxstyle="round", facecolor="white", alpha=0.85))
-
-    cax_shared = fig.add_axes([ax1.get_position().x0 + ax1.get_position().width/2, ax1.get_position().y0 - 0.12, ax3.get_position().width, 0.025])
+    # 1. Shared colorbar centered under Ground Truth + Prediction
+    # (x0 of ax1 to x1 of ax2)
+    bb1 = ax1.get_position()
+    bb2 = ax2.get_position()
+    x_center_shared = (bb1.x0 + bb2.x1) / 2
+    cb_w = bb1.width
+    cb_y = bb1.y0 - 0.12
+    
+    cax_shared = fig.add_axes([x_center_shared - cb_w/2, cb_y, cb_w, 0.025])
     fig.colorbar(im1, cax=cax_shared, orientation="horizontal")
     
-    cax_diff = fig.add_axes([ax3.get_position().x0, ax3.get_position().y0 - 0.12, ax3.get_position().width, 0.025])
+    # 2. Diff colorbar centered under panel 4
+    bb3 = ax3.get_position()
+    x_center_diff = bb3.x0 + bb3.width / 2
+    cax_diff = fig.add_axes([x_center_diff - cb_w/2, cb_y, cb_w, 0.025])
     fig.colorbar(im3, cax=cax_diff, orientation="horizontal")
+
+    # 3. Metrics text lower than colorbars
+    metrics_y = cb_y - 0.10
+    fig.text(x_center_diff, metrics_y, f"{line1}\n{line2}", 
+             ha="center", va="top", fontsize=10, family="monospace", 
+             bbox=dict(boxstyle="round", facecolor="white", alpha=0.85))
 
     plt.tight_layout(pad=1.5)
     plt.savefig(out_path, dpi=150, bbox_inches="tight", pad_inches=0.15)

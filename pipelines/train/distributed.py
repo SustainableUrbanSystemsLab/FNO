@@ -555,6 +555,11 @@ def main():
             # CRITICAL FIX: All ranks must track patience and decide to stop together.
             # Since avg_loss is synchronized (all_reduce), everyone sees the same value.
             
+            if is_main_process(rank):
+                train_losses.append(avg_loss)
+                # Validation loop omitted for brevity in some versions, but if current training is val-less:
+                val_losses.append(avg_loss) # Tracking training for now or val if exists
+            
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 patience_counter = 0
@@ -562,13 +567,27 @@ def main():
                 # Only Rank 0 saves the model
                 if is_main_process(rank):
                     state_dict = model.module.state_dict() if is_distributed else model.state_dict()
+                    # Payload including training history for tools/plot_all_histories.py
+                    payload = {
+                        'model_state_dict': state_dict,
+                        'history': {
+                            'train_loss': train_losses,
+                            'val_loss': val_losses,
+                            'epoch': epoch
+                        },
+                        'config': {
+                            'modes': (MODES1, MODES2),
+                            'width': WIDTH,
+                            'n_layers': N_LAYERS
+                        }
+                    }
                     temp_out = MODEL_OUT + ".tmp"
-                    torch.save(state_dict, temp_out)
+                    torch.save(payload, temp_out)
                     if os.path.exists(MODEL_OUT):
                         try: os.remove(MODEL_OUT)
                         except: pass
                     os.rename(temp_out, MODEL_OUT)
-                    print(f"  > New best loss! Saved {MODEL_OUT}")
+                    print(f"  > New best loss! Saved {MODEL_OUT} (Epoch {epoch})")
                     
             else:
                 patience_counter += 1

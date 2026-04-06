@@ -227,6 +227,14 @@ def main():
             avg_loss = running_loss / len(dataset)
             if is_main_process(rank):
                 print(f"Epoch {epoch}/{EPOCHS} Loss: {avg_loss:.6e}", flush=True)
+                
+                # Log epoch metrics
+                logger.log_epoch(epoch, {
+                    'total_loss': avg_loss,
+                    'learning_rate': scheduler.get_last_lr()[0],
+                    'best_loss': best_loss,
+                })
+
                 if avg_loss < best_loss:
                     best_loss = avg_loss
                     temp_out = MODEL_OUT + ".tmp"

@@ -145,6 +145,14 @@ def main():
 
         if is_main(rank):
             logger = TrainingLogger(output_dir='training_logs')
+            logger.start_training({
+                'batch_size': BATCH,
+                'epochs': EPOCHS,
+                'learning_rate': LR,
+                'modes': (MODES1, MODES2),
+                'width': WIDTH,
+                'physics_weights': {'continuity': CONT_W, 'momentum': MOM_W}
+            }, model=model.module if is_distributed else model)
 
         # --- Training Loop ---
         best_loss      = float('inf')
@@ -201,6 +209,16 @@ def main():
                 dur = time.time() - epoch_start
                 cont_avg = comp_accum['continuity_loss'] / n
                 wake_avg = comp_accum['wake_loss'] / n
+                
+                # Log to metrics CSV
+                logger.log_epoch(epoch, {
+                    'total_loss': avg_loss,
+                    'continuity_loss': cont_avg,
+                    'wake_loss': wake_avg,
+                    'learning_rate': scheduler.get_last_lr()[0],
+                    'best_loss': best_loss
+                })
+                
                 print(
                     f"Epoch {epoch:4d}/{EPOCHS} | Loss: {avg_loss:.4e} "
                     f"| Cont: {cont_avg:.4e} | Wake: {wake_avg:.4e} | ({dur:.1f}s)",

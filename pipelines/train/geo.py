@@ -186,7 +186,15 @@ def main():
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
         
         l2_loss = LpLoss(d=2, p=2); h1_loss = H1Loss(d=2)
-        if is_main_process(rank): logger = TrainingLogger(output_dir="training_logs")
+        if is_main_process(rank): 
+            logger = TrainingLogger(output_dir="training_logs")
+            logger.start_training({
+                'batch_size': BATCH,
+                'epochs': EPOCHS,
+                'learning_rate': LR,
+                'modes': (MODES1, MODES2),
+                'width': WIDTH,
+            }, model=model.module if is_distributed else model)
         
         best_loss = float('inf')
         for epoch in range(1, EPOCHS + 1):
@@ -227,6 +235,14 @@ def main():
             avg_loss = running_loss / len(dataset)
             if is_main_process(rank):
                 print(f"Epoch {epoch}/{EPOCHS} Loss: {avg_loss:.6e}", flush=True)
+                
+                # Log epoch metrics for plotting
+                logger.log_epoch(epoch, {
+                    'total_loss': avg_loss,
+                    'learning_rate': scheduler.get_last_lr()[0],
+                    'best_loss': best_loss,
+                })
+
                 if avg_loss < best_loss:
                     best_loss = avg_loss
                     temp_out = MODEL_OUT + ".tmp"
