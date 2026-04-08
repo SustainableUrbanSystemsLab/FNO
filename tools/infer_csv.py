@@ -139,28 +139,31 @@ def save_pred_vs_true(y_pred, y_true, out_path, x_input):
     line1 = f"MAE:{mae:.3f} | RMSE:{rmse:.3f} | MAPE:{mape:.1f}%"
     line2 = f"SSIM:{ssim_str} | GradCorr:{grad_corr:.3f} | R²:{r2:.3f}"
     
-    # 1. Shared colorbar centered under Ground Truth + Prediction
-    # (x0 of ax1 to x1 of ax2)
-    bb1 = ax1.get_position()
-    bb2 = ax2.get_position()
-    x_center_shared = (bb1.x0 + bb2.x1) / 2
-    cb_w = 0.18  # Fixed width for consistency
-    cb_y = bb1.y0 - 0.10
+    # --- COLORBARS AND METRICS ---
+    # 1. Shared colorbar centered under Ground Truth (ax1) and Prediction (ax2)
+    pos1 = ax1.get_position()
+    pos2 = ax2.get_position()
+    x_center_top = (pos1.x0 + pos2.x1) / 2.0
     
-    cax_shared = fig.add_axes([x_center_shared - cb_w/2, cb_y, cb_w, 0.025])
+    cb_w = 0.16  # Fixed width
+    cb_h = 0.02
+    cb_y = pos1.y0 - 0.08
+    
+    cax_shared = fig.add_axes([x_center_top - cb_w/2, cb_y, cb_w, cb_h])
     fig.colorbar(im1, cax=cax_shared, orientation="horizontal")
     
-    # 2. Diff colorbar centered under panel 4
-    bb3 = ax3.get_position()
-    x_center_diff = bb3.x0 + bb3.width / 2
-    cax_diff = fig.add_axes([x_center_diff - cb_w/2, cb_y, cb_w, 0.025])
+    # 2. Diff colorbar centered under Diff Panel (ax3)
+    pos3 = ax3.get_position()
+    x_center_diff = pos3.x0 + pos3.width / 2.0
+    
+    cax_diff = fig.add_axes([x_center_diff - cb_w/2, cb_y, cb_w, cb_h])
     fig.colorbar(im3, cax=cax_diff, orientation="horizontal")
 
-    # 3. Metrics text centered under panel 4, lower than colorbar
-    metrics_y = cb_y - 0.12 # Increase separation
+    # 3. Metrics text centered under Diff Panel, below colorbar
+    metrics_y = cb_y - 0.10
     fig.text(x_center_diff, metrics_y, f"{line1}\n{line2}", 
              ha="center", va="top", fontsize=9, family="monospace", 
-             bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="gray", alpha=0.9))
+             bbox=dict(boxstyle="round,pad=0.4", facecolor="white", edgecolor="gray", alpha=0.9))
 
     plt.tight_layout(pad=1.5)
     plt.savefig(out_path, dpi=150, bbox_inches="tight", pad_inches=0.15)
