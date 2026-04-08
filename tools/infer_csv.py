@@ -144,8 +144,8 @@ def save_pred_vs_true(y_pred, y_true, out_path, x_input):
     bb1 = ax1.get_position()
     bb2 = ax2.get_position()
     x_center_shared = (bb1.x0 + bb2.x1) / 2
-    cb_w = bb1.width
-    cb_y = bb1.y0 - 0.12
+    cb_w = 0.18  # Fixed width for consistency
+    cb_y = bb1.y0 - 0.10
     
     cax_shared = fig.add_axes([x_center_shared - cb_w/2, cb_y, cb_w, 0.025])
     fig.colorbar(im1, cax=cax_shared, orientation="horizontal")
@@ -156,11 +156,11 @@ def save_pred_vs_true(y_pred, y_true, out_path, x_input):
     cax_diff = fig.add_axes([x_center_diff - cb_w/2, cb_y, cb_w, 0.025])
     fig.colorbar(im3, cax=cax_diff, orientation="horizontal")
 
-    # 3. Metrics text lower than colorbars
-    metrics_y = cb_y - 0.10
+    # 3. Metrics text centered under panel 4, lower than colorbar
+    metrics_y = cb_y - 0.12 # Increase separation
     fig.text(x_center_diff, metrics_y, f"{line1}\n{line2}", 
-             ha="center", va="top", fontsize=10, family="monospace", 
-             bbox=dict(boxstyle="round", facecolor="white", alpha=0.85))
+             ha="center", va="top", fontsize=9, family="monospace", 
+             bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="gray", alpha=0.9))
 
     plt.tight_layout(pad=1.5)
     plt.savefig(out_path, dpi=150, bbox_inches="tight", pad_inches=0.15)

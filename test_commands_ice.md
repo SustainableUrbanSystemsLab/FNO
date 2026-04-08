@@ -2,65 +2,79 @@
 
 Make sure to run `git pull` before running any tests.
 
-### 1. Standard Distributed FNO 
-**Train:**
+### 🗺️ 1. Compute Node Access (Interactive)
+To start a session with a GPU for testing:
 ```bash
-bash slurm/deploy_ice.sh --config configs/config_test.toml --script pipelines/train/distributed.py --gpu h200 --ngpus 1 --fresh
+salloc -N 1 -c 4 --mem=16G --partition=coe-gpu --gres=gpu:1 -t 2:00:00
 ```
-**Evaluate:**
-```bash
-uv run python tools/evaluate_fno.py --model fno_test_weights.pth --data test_csv/ML_FormFlux_1_135.csv --output dist_diagnostic.png
-```
-*(Produces: `dist_diagnostic.png`)*
 
 ---
 
-### 2. Hybrid FNO (Physics + Data)
-**Train:**
+### 🚀 2. Training Models (Distributed)
+Launch multi-GPU training jobs using the SLURM wrapper.
+
+**Standard FNO:**
 ```bash
-bash slurm/deploy_ice.sh --config configs/config_test.toml --script pipelines/train/hybrid.py --gpu h200 --ngpus 1 --fresh
+bash slurm/deploy_ice.sh --config config.toml --script pipelines/train/distributed.py --gpu h100 --ngpus 2 --fresh
 ```
-**Evaluate:**
+
+**Hybrid U-FNO (Boundary-Aware):**
 ```bash
-uv run python tools/diagnose_hybrid.py --model hybrid_fno_weights.pth --data test_csv/ML_FormFlux_1_135.csv --output hybrid_diagnostic.png
+bash slurm/deploy_ice.sh --config config.toml --script pipelines/train/hybrid.py --gpu h100 --ngpus 2 --fresh
 ```
-*(Produces: `hybrid_diagnostic.png`)*
+
+**PINN-FNO (Physics-Informed):**
+```bash
+bash slurm/deploy_ice.sh --config config.toml --script pipelines/train/pinn.py --gpu h100 --ngpus 2 --fresh
+```
+
+**Geo-FNO (Geometry-Aware):**
+```bash
+bash slurm/deploy_ice.sh --config config.toml --script pipelines/train/geo.py --gpu h100 --ngpus 2 --fresh
+```
 
 ---
 
-### 3. PINN FNO (Strict Physics Informed)
-**Train:**
+### 🏁 3. Universal Inference (New CLI)
+Use these for high-fidelity 4-panel diagnostic plots and Grasshopper CSVs.
+
+**Standard:**
 ```bash
-bash slurm/deploy_ice.sh --config configs/config_test.toml --script pipelines/train/pinn.py --gpu h200 --ngpus 1 --fresh
+uv run python run_inference.py --scenario STANDARD --csv test_csv/ML_FormFlux_1_135.csv
 ```
-**Evaluate:**
+
+**Hybrid:**
 ```bash
-uv run python tools/diagnose_pinn.py --model pinn_fno_weights.pth --data test_csv/ML_FormFlux_1_135.csv --output pinn_diagnostic.png
+uv run python run_inference.py --scenario HYBRID --csv test_csv/ML_FormFlux_1_135.csv
 ```
-*(Produces: `pinn_diagnostic.png`)*
+
+**PINN:**
+```bash
+uv run python run_inference.py --scenario PINN --csv test_csv/ML_FormFlux_1_135.csv
+```
+
+**Geo:**
+```bash
+uv run python run_inference.py --scenario GEO --csv test_csv/ML_FormFlux_1_135.csv
+```
+
+**Batch Inference (All Files in Folder):**
+```bash
+uv run python run_inference.py --scenario GEO --csv test_csv/ --output_dir results/batch_eval/
+```
 
 ---
 
-### 4. Geo-FNO (Geometry-Aware Deep Deformation)
-**Train:**
-```bash
-bash slurm/deploy_ice.sh --config configs/config_test.toml --script pipelines/train/geo.py --gpu h200 --ngpus 1 --fresh
-```
-**Evaluate:**
-```bash
-uv run python tools/diagnose_geo.py --model geo_fno_weights.pth --data test_csv/ML_FormFlux_1_135.csv --output geo_diagnostic.png
-```
-*(Produces: `geo_diagnostic.png`)*
+### 📊 4. Master Evaluation & Performance
+Compare architectures and visualize convergence.
 
----
+**Master Side-By-Side Comparison (6-Column Plot):**
+```bash
+uv run python tools/compare_all_models.py --data test_csv/ML_FormFlux_1_135.csv --output full_comparison.png
+```
 
-### 5. Standard Non-Distributed FNO (Legacy)
-**Train:**
+**Training Curves Comparison (Loss History):**
 ```bash
-bash slurm/deploy_ice.sh --config configs/config_test.toml --script pipelines/train/standard.py --gpu h200 --ngpus 1 --fresh
+uv run python tools/plot_comparison_curves.py
 ```
-**Evaluate:**
-```bash
-uv run python tools/evaluate_fno.py --model fno_mag_weights.pth --data test_csv/ML_FormFlux_1_135.csv --output standard_diagnostic.png
-```
-*(Produces: `standard_diagnostic.png`)*
+*(Produces: `model_training_comparison.png`)*
