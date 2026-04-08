@@ -78,7 +78,7 @@ def save_pred_vs_true(y_pred, y_true, out_path, x_input):
     y_pred_vis = np.ma.masked_where(outside, np.maximum(y_pred, 0))
     diff_vis = np.ma.masked_where(outside, y_pred - y_true)
 
-    fig = plt.figure(figsize=(24, 6))
+    fig = plt.figure(figsize=(24, 8)) # Increased height from 6 to 8
     ax0 = plt.subplot(1, 4, 1); plot_domain_panel(ax0, x_input)
     
     ax1 = plt.subplot(1, 4, 2)
@@ -146,24 +146,25 @@ def save_pred_vs_true(y_pred, y_true, out_path, x_input):
     x_center_top = (pos1.x0 + pos2.x1) / 2.0
     
     cb_w = 0.16  # Fixed width
-    cb_h = 0.02
-    cb_y = pos1.y0 - 0.08
+    cb_h = 0.025
+    cb_y = pos1.y0 - 0.16 # Significantly lower to clear the circles
     
     cax_shared = fig.add_axes([x_center_top - cb_w/2, cb_y, cb_w, cb_h])
     fig.colorbar(im1, cax=cax_shared, orientation="horizontal")
     
     # 2. Diff colorbar centered under Diff Panel (ax3)
     pos3 = ax3.get_position()
-    x_center_diff = pos3.x0 + pos3.width / 2.0
+    # Nudge slightly to the right (+0.01) to perfectly align with panel 4
+    x_center_diff = pos3.x0 + pos3.width / 2.0 + 0.01
     
     cax_diff = fig.add_axes([x_center_diff - cb_w/2, cb_y, cb_w, cb_h])
     fig.colorbar(im3, cax=cax_diff, orientation="horizontal")
 
     # 3. Metrics text centered under Diff Panel, below colorbar
-    metrics_y = cb_y - 0.10
+    metrics_y = cb_y - 0.12
     fig.text(x_center_diff, metrics_y, f"{line1}\n{line2}", 
              ha="center", va="top", fontsize=9, family="monospace", 
-             bbox=dict(boxstyle="round,pad=0.4", facecolor="white", edgecolor="gray", alpha=0.9))
+             bbox=dict(boxstyle="round,pad=0.5", facecolor="white", edgecolor="gray", alpha=0.9))
 
     plt.tight_layout(pad=1.5)
     plt.savefig(out_path, dpi=150, bbox_inches="tight", pad_inches=0.15)
