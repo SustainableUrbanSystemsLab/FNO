@@ -157,6 +157,8 @@ def main():
         # --- Training Loop ---
         best_loss      = float('inf')
         patience_count = 0
+        train_losses   = []
+        val_losses     = []
 
         for epoch in range(1, EPOCHS + 1):
             if is_distributed: sampler.set_epoch(epoch)
@@ -218,6 +220,8 @@ def main():
                     'learning_rate': scheduler.get_last_lr()[0],
                     'best_loss': best_loss
                 })
+                train_losses.append(avg_loss)
+                val_losses.append(avg_loss)
                 
                 print(
                     f"Epoch {epoch:4d}/{EPOCHS} | Loss: {avg_loss:.4e} "
@@ -228,9 +232,25 @@ def main():
                 if avg_loss < best_loss:
                     best_loss = avg_loss
                     patience_count = 0
+                    
+                    # Payload including training history for tools/plot_comparison_curves.py
                     sd = model.module.state_dict() if is_distributed else model.state_dict()
+                    payload = {
+                        'model_state_dict': sd,
+                        'history': {
+                            'train_loss': train_losses,
+                            'val_loss': val_losses,
+                            'epoch': epoch
+                        },
+                        'config': {
+                            'modes': (MODES1, MODES2),
+                            'width': WIDTH,
+                            'n_layers': config.get('model', {}).get('n_layers', 4)
+                        }
+                    }
+                    
                     temp_out = MODEL_OUT + ".tmp"
-                    torch.save(sd, temp_out)
+                    torch.save(payload, temp_out)
                     if os.path.exists(MODEL_OUT): os.remove(MODEL_OUT)
                     os.rename(temp_out, MODEL_OUT)
                     print(f"  ★ Best model saved (loss={best_loss:.4e})", flush=True)
