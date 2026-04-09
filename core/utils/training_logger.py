@@ -97,6 +97,12 @@ class TrainingLogger:
             metrics: Dictionary with keys like 'total_loss', 'mse_loss', 'gradient_loss', 
                     'spectral_loss', 'peak_loss', 'learning_rate', 'epoch_time', 'best_loss', 'patience'
         """
+        # Lazily initialize CSV if start_training() was never called
+        if not hasattr(self, 'fieldnames') or self.csv_writer is None:
+            if self.start_time is None:
+                self.start_time = time.time()
+            self._init_csv()
+
         # Prepare row
         row = [int(epoch)]
         for k in self.fieldnames[1:]:
@@ -108,6 +114,7 @@ class TrainingLogger:
         self.csv_writer.writerow(row)
         self.csv_file.flush()
         self.epoch_metrics.append(metrics)
+
         
     def finish_training(self, final_metrics: Dict[str, Any] = None):
         """Finalize logging and save summary.

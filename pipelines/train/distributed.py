@@ -453,6 +453,10 @@ def main():
 
     if is_main_process(rank):
         sys.stdout.flush()  # Ensure all printout appears in log before training starts
+
+    # History tracking for plot_comparison_curves.py
+    train_losses = []
+    val_losses = []
     
     for epoch in range(start_epoch, target_end_epoch + 1):
         epoch_start = time.time()
