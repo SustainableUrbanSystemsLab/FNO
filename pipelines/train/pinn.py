@@ -8,6 +8,7 @@ Usage:
 """
 
 import os, sys, torch, numpy as np, pandas as pd, tomllib, argparse, glob, hashlib, pickle, traceback, time
+from datetime import datetime
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
@@ -144,7 +145,8 @@ def main():
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
 
         if is_main(rank):
-            logger = TrainingLogger(output_dir='training_logs')
+            _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            logger = TrainingLogger(output_dir='training_logs', experiment_name=f"PINN_{_ts}")
             logger.start_training({
                 'batch_size': BATCH,
                 'epochs': EPOCHS,

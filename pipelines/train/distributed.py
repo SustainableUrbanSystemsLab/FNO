@@ -3,6 +3,7 @@
 #    or: python train_fno_distributed.py (falls back to single GPU)
 
 import os, glob, numpy as np, torch, sys, argparse, time
+from datetime import datetime
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset
@@ -420,7 +421,8 @@ def main():
         print("=" * 50)
         
         # Initialize training logger for publication metrics
-        logger = TrainingLogger(output_dir="training_logs")
+        _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        logger = TrainingLogger(output_dir="training_logs", experiment_name=f"STANDARD_{_ts}")
         logger.start_training({
             'batch_size': BATCH,
             'epochs': EPOCHS,
