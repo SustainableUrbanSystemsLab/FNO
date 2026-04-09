@@ -155,7 +155,7 @@ def save_pred_vs_true(y_pred, y_true, out_path, x_input):
     # 2. Diff colorbar centered under Diff Panel (ax3)
     pos3 = ax3.get_position()
     # Nudge more to the right (+0.03) to perfectly align with panel 4
-    x_center_diff = pos3.x0 + pos3.width / 2.0 + 0.1
+    x_center_diff = pos3.x0 + pos3.width / 2.0 + 0.8
 
 
     
