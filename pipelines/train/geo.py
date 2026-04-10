@@ -102,7 +102,12 @@ def main():
             elif check_path(linux_path, "Linux Path"):
                 DATA_FOLDER = linux_path
             else:
-                guesses = ["/storage/ice1/2/4/scratch/Training_Dataset", "/storage/ice1/2/4/athach7/Training_Dataset"]
+                _user = os.environ.get('USER', 'unknown')
+                guesses = [
+                    f"/home/hice1/{_user}/scratch/Training_Dataset",
+                    f"/storage/ice1/2/4/{_user}/Training_Dataset",
+                    "/storage/ice1/2/4/scratch/Training_Dataset",
+                ]
                 for guess in guesses:
                     if check_path(guess, "Hardcoded Guess"):
                         DATA_FOLDER = guess

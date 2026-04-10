@@ -3,9 +3,11 @@
 
 [paths]
 # Training data paths - script auto-detects platform
+# ⚠️  NEW USER: Update data_folder_ice to your ICE scratch path:
+#     /home/hice1/<YOUR_GT_USERNAME>/scratch/Training_Dataset
 data_folder_windows = "C:/LabShare/Dataset/FormFluxCases/Compressed/Training_Dataset"
 data_folder_linux = "./train_csv"
-data_folder_ice = "/home/hice1/ikaradag3/scratch/Conditional_Transformer/dataset/_npy_cache_expanded_dataset_p2p"
+data_folder_ice = "/home/hice1/athach7/scratch/Training_Dataset"
 
 # Path to test CSV files for inference
 test_folder = 'test_csv'
