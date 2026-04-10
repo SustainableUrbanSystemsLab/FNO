@@ -16,9 +16,9 @@ test_folder = 'test_csv'
 model_output = "fno_mag_weights.pth"
 
 [training]
-batch_size = 8
+batch_size = 4
 epochs = 200
-learning_rate = 1e-4
+learning_rate = 5e-4
 patience = 50
 checkpoint_interval = 10
 
@@ -36,7 +36,7 @@ gradient_weight   = 1.5
 spectral_weight   = 0.001
 peak_weight       = 0.5
 wake_weight       = 1.0
-warmup_epochs     = 10     # Drop warmup so physics kicks in early
+warmup_epochs     = 10
 
 # PINN-specific physics constraints
 continuity_weight = 1.0    # Increased to enforce ∇·u ≈ 0
@@ -44,7 +44,7 @@ momentum_weight   = 0.1
 
 [performance]
 # Number of parallel workers for data loading (0 = auto-detect)
-num_workers = 0
+num_workers = 4
 
 [pace]
 # PACE cluster configuration (required for job submission)
