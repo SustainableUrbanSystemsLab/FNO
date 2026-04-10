@@ -21,14 +21,22 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-# Read [ice] section from config.toml
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "ERROR: Config file '$CONFIG_FILE' not found."
+# Use config.local.toml for [ice] credentials if it exists (gitignored, never overwritten by pulls)
+# Falls back to config.toml if not found
+LOCAL_CONFIG="config.local.toml"
+ICE_CONFIG_FILE="$CONFIG_FILE"
+if [ -f "$LOCAL_CONFIG" ]; then
+    echo "Using local overrides from $LOCAL_CONFIG"
+    ICE_CONFIG_FILE="$LOCAL_CONFIG"
+fi
+
+if [ ! -f "$ICE_CONFIG_FILE" ]; then
+    echo "ERROR: Config file '$ICE_CONFIG_FILE' not found."
     exit 1
 fi
 
-ICE_SECTION=$(sed -n '/^\[ice\]/,/^\s*\[/p' "$CONFIG_FILE")
-[ -z "$ICE_SECTION" ] && ICE_SECTION=$(sed -n '/^\[ice\]/,$p' "$CONFIG_FILE")
+ICE_SECTION=$(sed -n '/^\[ice\]/,/^\s*\[/p' "$ICE_CONFIG_FILE")
+[ -z "$ICE_SECTION" ] && ICE_SECTION=$(sed -n '/^\[ice\]/,$p' "$ICE_CONFIG_FILE")
 
 ICE_ACCOUNT=$(echo   "$ICE_SECTION" | grep -E "^\s*account\s*="   | sed 's/.*=\s*//;s/[" ]//g;s/#.*//')
 ICE_PARTITION=$(echo "$ICE_SECTION" | grep -E "^\s*partition\s*="  | sed 's/.*=\s*//;s/[" ]//g;s/#.*//')
