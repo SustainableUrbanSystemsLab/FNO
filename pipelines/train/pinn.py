@@ -196,9 +196,15 @@ def main():
 
             # Sync across GPUs
             if is_distributed:
-                t = torch.tensor(running, device=device)
+                torch.cuda.synchronize()
+                dist.barrier()
+                keys = ['mse_loss','gradient_loss','continuity_loss','momentum_loss','wake_loss','peak_loss']
+                vals = [running] + [comp_accum[k] for k in keys]
+                t = torch.tensor(vals, device=device)
                 dist.all_reduce(t, op=dist.ReduceOp.SUM)
-                running = t.item()
+                running = t[0].item()
+                for i, k in enumerate(keys):
+                    comp_accum[k] = t[i+1].item()
 
             scheduler.step()
             n = len(dataset)
@@ -206,15 +212,23 @@ def main():
 
             if is_main(rank):
                 dur = time.time() - epoch_start
-                cont_avg = comp_accum['continuity_loss'] / n
-                wake_avg = comp_accum['wake_loss'] / n
+                # Calculate averages
+                avgs = {k: comp_accum[k] / n for k in comp_accum}
+                cont_avg = avgs['continuity_loss']
+                wake_avg = avgs['wake_loss']
                 
                 # Log to metrics CSV
                 logger.log_epoch(epoch, {
                     'total_loss': avg_loss,
+                    'mse_loss': avgs['mse_loss'],
+                    'gradient_loss': avgs['gradient_loss'],
                     'continuity_loss': cont_avg,
+                    'momentum_loss': avgs['momentum_loss'],
                     'wake_loss': wake_avg,
+                    'peak_loss': avgs['peak_loss'],
+                    'spectral_loss': 0.0, # PINN does not have spectral loss natively but for tabular alignment
                     'learning_rate': scheduler.get_last_lr()[0],
+                    'epoch_time_sec': dur,
                     'best_loss': best_loss
                 })
                 train_losses.append(avg_loss)

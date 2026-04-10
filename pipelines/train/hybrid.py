@@ -235,9 +235,16 @@ def main():
                 running_wake += components.get('wake_loss', 0.0) * n
 
             if is_distributed:
-                loss_tensor = torch.tensor(running_loss, device=device)
-                dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
-                running_loss = loss_tensor.item()
+                torch.cuda.synchronize()
+                dist.barrier()
+                running_tensor = torch.tensor([running_loss, running_mse, running_grad, running_spec, running_peak, running_wake], device=device)
+                dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
+                running_loss = running_tensor[0].item()
+                running_mse  = running_tensor[1].item()
+                running_grad = running_tensor[2].item()
+                running_spec = running_tensor[3].item()
+                running_peak = running_tensor[4].item()
+                running_wake = running_tensor[5].item()
 
             scheduler.step()
             n_samples = len(dataset)

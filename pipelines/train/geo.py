@@ -200,9 +200,15 @@ def main():
         train_losses = []
         val_losses = []
         for epoch in range(1, EPOCHS + 1):
+            epoch_start = time.time()
             if is_distributed: sampler.set_epoch(epoch)
             model.train()
             running_loss = 0.0
+            running_mse = 0.0
+            running_grad = 0.0
+            running_spec = 0.0
+            running_peak = 0.0
+            running_wake = 0.0
             for batch in loader:
                 xb, yb = batch
                 xb, yb = xb.to(device), yb.to(device)
@@ -226,23 +232,49 @@ def main():
                 )
                 
                 opt.zero_grad(); loss.backward(); opt.step()
-                running_loss += loss.item() * xb.shape[0]
+                n = xb.shape[0]
+                running_loss += loss.item() * n
+                running_mse  += components['mse_loss'] * n
+                running_grad += components['gradient_loss'] * n
+                running_spec += components['spectral_loss'] * n
+                running_peak += components.get('peak_loss', 0.0) * n
+                running_wake += components.get('wake_loss', 0.0) * n
 
             if is_distributed:
-                loss_tensor = torch.tensor(running_loss, device=device)
-                dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
-                running_loss = loss_tensor.item()
+                torch.cuda.synchronize()
+                dist.barrier()
+                running_tensor = torch.tensor([running_loss, running_mse, running_grad, running_spec, running_peak, running_wake], device=device)
+                dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
+                running_loss = running_tensor[0].item()
+                running_mse  = running_tensor[1].item()
+                running_grad = running_tensor[2].item()
+                running_spec = running_tensor[3].item()
+                running_peak = running_tensor[4].item()
+                running_wake = running_tensor[5].item()
             
             scheduler.step()
-            avg_loss = running_loss / len(dataset)
+            n_samples = len(dataset)
+            avg_loss = running_loss / n_samples
+            avg_mse  = running_mse  / n_samples
+            avg_grad = running_grad / n_samples
+            avg_spec = running_spec / n_samples
+            avg_peak = running_peak / n_samples
+            avg_wake = running_wake / n_samples
+            epoch_duration = time.time() - epoch_start
             if is_main_process(rank):
                 print(f"Epoch {epoch}/{EPOCHS} Loss: {avg_loss:.6e}", flush=True)
                 
                 # Log epoch metrics for plotting
                 logger.log_epoch(epoch, {
-                    'total_loss': avg_loss,
+                    'total_loss':    avg_loss,
+                    'mse_loss':      avg_mse,
+                    'gradient_loss': avg_grad,
+                    'spectral_loss': avg_spec,
+                    'peak_loss':     avg_peak,
+                    'wake_loss':     avg_wake,
                     'learning_rate': scheduler.get_last_lr()[0],
-                    'best_loss': best_loss,
+                    'epoch_time_sec': epoch_duration,
+                    'best_loss':     best_loss,
                 })
                 train_losses.append(avg_loss)
                 val_losses.append(avg_loss) # Tracking training for now
