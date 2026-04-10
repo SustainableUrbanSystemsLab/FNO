@@ -21,13 +21,37 @@ All model architectures reside in `core/models/` and have their own dedicated mu
 
 ## ⚡ 2. Deployment on PACE ICE Cluster
 
-The entire repository is dynamically linked via `config.toml` (and override configs like `configs/config_test.toml`). It natively utilizes SLURM for multi-GPU training.
+The entire repository is dynamically linked via `config.toml`. It natively utilizes SLURM for multi-GPU training.
 
 We use **Rolling Atomic Checkpoints**. The framework will safely and atomically overwrite temporary `.pth.tmp` files every epoch before solidifying the name—this strictly protects cluster users from hitting gigabyte-scale Disk Quota `zipfile` corruption.
 
-**Trigger a Cluster Training Job:**
+### User-Specific Configuration
+
+`config.toml` contains shared training parameters and is committed to the repo. **Do not put your personal credentials or data paths in `config.toml`.**
+
+Instead, create a `config.local.toml` in the project root on your cluster environment. This file is gitignored and will never be overwritten by `git pull`:
+
+```toml
+# config.local.toml — create this once on your cluster, never commit it
+[paths]
+data_folder_ice = "/home/hice1/<your_username>/scratch/path/to/dataset"
+
+[ice]
+account = "your_account"
+partition = "ice-gpu"
+walltime = "11:50:00"
+```
+
+All four training pipelines automatically merge `config.local.toml` on top of `config.toml` at startup — local values take priority.
+
+**Submit a Hybrid FNO training job:**
 ```bash
-bash slurm/deploy_ice.sh --config configs/config_test.toml --script pipelines/train/geo.py --gpu h200 --ngpus 1 --fresh
+bash slurm/deploy_hybrid.sh --fresh
+```
+
+**Submit any other model via the generic deploy script:**
+```bash
+bash slurm/deploy_ice.sh --script pipelines/train/geo.py --gpu h200 --ngpus 1 --fresh
 ```
 
 ---
