@@ -313,6 +313,18 @@ def main():
         if is_distributed: cleanup_distributed()
         sys.exit(1)
 
+    if is_main_process(rank):
+        print(f"Training finished. Best loss: {best_loss:.6e}")
+        # Finalize training logger
+        if 'logger' in locals():
+            logger.finish_training({'best_loss': best_loss})
+            # Generate publication-ready plots
+            try:
+                from core.utils.generate_plots import generate_publication_plots
+                generate_publication_plots(logger.metrics_csv)
+            except Exception as e:
+                print(f"[Plots] Could not generate plots: {e}")
+
     cleanup_distributed()
 
 if __name__ == "__main__":
