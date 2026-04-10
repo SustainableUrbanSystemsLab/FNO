@@ -30,14 +30,7 @@ from neuralop.losses import LpLoss, H1Loss
 from pipelines.train.distributed import NpyDataset
 
 # ============ Load Configuration ============
-def load_config(config_file):
-    """Load configuration from toml file."""
-    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../', config_file))
-    if os.path.exists(config_path):
-        with open(config_path, 'rb') as f:
-            return tomllib.load(f)
-    print(f"Warning: {config_file} not found, using defaults")
-    return {}
+from core.utils.config_loader import load_config
 
 # ============ Distributed Setup ============
 def setup_distributed():

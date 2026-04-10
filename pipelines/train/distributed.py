@@ -26,17 +26,7 @@ _pre_parser.add_argument('--config', type=str, default='config.toml', help='Conf
 _pre_args, _ = _pre_parser.parse_known_args()
 CONFIG_FILE = _pre_args.config
 
-def load_config():
-    """Load configuration from config.toml file."""
-    import tomllib  # Python 3.11+ built-in
-    
-    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../', CONFIG_FILE))
-    if os.path.exists(config_path):
-        with open(config_path, 'rb') as f:
-            return tomllib.load(f)
-    else:
-        print(f"Warning: {CONFIG_FILE} not found, using defaults")
-        return {}
+from core.utils.config_loader import load_config
 
 config = load_config()
 

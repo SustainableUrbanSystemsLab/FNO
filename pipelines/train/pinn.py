@@ -24,12 +24,7 @@ from pipelines.train.distributed import NpyDataset
 
 
 # ============ Config ============
-def load_config(config_file):
-    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../', config_file))
-    if os.path.exists(config_path):
-        with open(config_path, 'rb') as f:
-            return tomllib.load(f)
-    return {}
+from core.utils.config_loader import load_config
 
 
 # ============ Distributed ============

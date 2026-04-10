@@ -30,35 +30,7 @@ from neuralop.losses import LpLoss, H1Loss
 from pipelines.train.distributed import NpyDataset
 
 # ============ Load Configuration ============
-def load_config(config_file):
-    """Load config.toml as base, then merge config.local.toml on top if it exists.
-    Local values override shared values — training params stay in config.toml,
-    user-specific paths and ICE credentials go in config.local.toml.
-    """
-    root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
-
-    # 1. Load base config
-    base_path = os.path.join(root, 'config.toml')
-    config = {}
-    if os.path.exists(base_path):
-        with open(base_path, 'rb') as f:
-            config = tomllib.load(f)
-    else:
-        print("Warning: config.toml not found, using defaults")
-
-    # 2. Merge config.local.toml on top — section by section
-    local_path = os.path.join(root, 'config.local.toml')
-    if os.path.exists(local_path):
-        with open(local_path, 'rb') as f:
-            local = tomllib.load(f)
-        for section, values in local.items():
-            if section in config and isinstance(config[section], dict):
-                config[section].update(values)
-            else:
-                config[section] = values
-        print("Loaded local overrides from config.local.toml")
-
-    return config
+from core.utils.config_loader import load_config
 
 # ============ Distributed Setup ============
 def setup_distributed():
