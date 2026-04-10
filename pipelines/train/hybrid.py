@@ -128,6 +128,7 @@ def main():
         MODES1 = config.get('model', {}).get('modes1', 32)
         MODES2 = config.get('model', {}).get('modes2', 32)
         WIDTH = config.get('model', {}).get('width', 64)
+        N_LAYERS = config.get('model', {}).get('n_layers', 4)
         
         GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.5)
         SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
@@ -261,7 +262,7 @@ def main():
                         'config': {
                             'modes': (MODES1, MODES2),
                             'width': WIDTH,
-                            'n_layers': n_layers # Assuming n_layers is defined or used from config
+                            'n_layers': N_LAYERS
                         }
                     }
                     
