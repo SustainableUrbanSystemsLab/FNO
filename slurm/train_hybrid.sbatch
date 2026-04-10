@@ -7,9 +7,8 @@
 #SBATCH -t 11:50:00
 #SBATCH -o logs/hybrid_%j.out
 #SBATCH -e logs/hybrid_%j.err
-#SBATCH --gres=gpu:H200:1
-#SBATCH --account=coa
-#SBATCH --partition=ice-gpu
+# --gres, --account, --partition are passed by deploy_hybrid.sh from config.toml
+# Do not hardcode them here so any user can run without editing this file
 
 echo "Job started on $(date)"
 echo "Running on node $(hostname)"
