@@ -55,6 +55,6 @@ walltime = "08:00:00"
 
 [ice]
 # ICE cluster configuration
-account = "coc"
+account = "coa"
 partition = "" # Optional, add if needed
 walltime = "08:00:00"

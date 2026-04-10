@@ -8,7 +8,7 @@
 #SBATCH -o logs/hybrid_%j.out
 #SBATCH -e logs/hybrid_%j.err
 #SBATCH --gres=gpu:H200:1
-#SBATCH --account=coc
+#SBATCH --account=coa
 #SBATCH --partition=ice-gpu
 
 echo "Job started on $(date)"
