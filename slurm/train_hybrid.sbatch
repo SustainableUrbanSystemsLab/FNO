@@ -4,7 +4,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=128G
-#SBATCH -t 08:00:00
+#SBATCH -t 11:50:00
 #SBATCH -o logs/hybrid_%j.out
 #SBATCH -e logs/hybrid_%j.err
 #SBATCH --gres=gpu:H200:1
