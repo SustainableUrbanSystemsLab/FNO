@@ -68,8 +68,8 @@ def plot_domain_panel(ax, x_input):
     ax.set_xticks([]); ax.set_yticks([])
     for sp in ax.spines.values(): sp.set_visible(False)
 
-def save_pred_vs_true(y_pred, y_true, out_path, x_input):
-    H, W = y_true.shape
+def save_pred_vs_true(y_pred, y_true, out_path, x_input, has_gt=True):
+    H, W = y_pred.shape
     cy_m, cx_m = H // 2, W // 2
     Yc_m, Xc_m = np.ogrid[:H, :W]
     outside = np.sqrt((Xc_m - cx_m)**2 + (Yc_m - cy_m)**2) >= (min(H, W)//2 - 5)
@@ -78,91 +78,93 @@ def save_pred_vs_true(y_pred, y_true, out_path, x_input):
     y_pred_vis = np.ma.masked_where(outside, np.maximum(y_pred, 0))
     diff_vis = np.ma.masked_where(outside, y_pred - y_true)
 
-    fig = plt.figure(figsize=(24, 8)) # Increased height from 6 to 8
+    fig = plt.figure(figsize=(24, 8)) 
     ax0 = plt.subplot(1, 4, 1); plot_domain_panel(ax0, x_input)
     
     ax1 = plt.subplot(1, 4, 2)
-    ax1.set_title("Ground Truth", pad=36, fontsize=15, fontweight="bold", bbox=dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
+    ax1.set_title("Ground Truth" if has_gt else "Ground Truth (N/A)", pad=36, fontsize=15, fontweight="bold", bbox=dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
     im1 = ax1.imshow(y_true_vis, cmap="viridis", vmin=0.0, vmax=2.0, origin="lower")
-    ax1.contour(x_input[2], levels=[0.5], colors="white", linewidths=0.5, origin="lower")
+    
+    # Use Bldg_height (x_input[1]) for contours to show buildings, scaled back 
+    bldg_area = x_input[1] > 0
+    if np.any(bldg_area):
+        ax1.contour(bldg_area, levels=[0.5], colors="white", linewidths=0.5, origin="lower")
+        
     ax1.set_xticks([]); ax1.set_yticks([])
     for sp in ax1.spines.values(): sp.set_visible(False)
 
     ax2 = plt.subplot(1, 4, 3)
     ax2.set_title("Prediction", pad=36, fontsize=15, fontweight="bold", bbox=dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
     ax2.imshow(y_pred_vis, cmap="viridis", vmin=0.0, vmax=2.0, origin="lower")
-    ax2.contour(x_input[2], levels=[0.5], colors="white", linewidths=0.5, origin="lower")
+    if np.any(bldg_area):
+        ax2.contour(bldg_area, levels=[0.5], colors="white", linewidths=0.5, origin="lower")
     ax2.set_xticks([]); ax2.set_yticks([])
     for sp in ax2.spines.values(): sp.set_visible(False)
 
     ax3 = plt.subplot(1, 4, 4)
-    ax3.set_title("Diff (Pred - GT)", pad=36, fontsize=15, fontweight="bold", bbox=dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
-    im3 = ax3.imshow(diff_vis, cmap="RdBu", vmin=-2.0, vmax=2.0, origin="lower")
+    ax3.set_title("Diff (Pred - GT)" if has_gt else "Diff (N/A)", pad=36, fontsize=15, fontweight="bold", bbox=dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
+    im3 = ax3.imshow(diff_vis if has_gt else np.zeros_like(diff_vis), cmap="RdBu", vmin=-1.0, vmax=1.0, origin="lower")
     ax3.set_xticks([]); ax3.set_yticks([])
     for sp in ax3.spines.values(): sp.set_visible(False)
 
     # Metrics
-    dm = ~outside
-    diff_m, abs_m = diff_vis[dm], np.abs(diff_vis[dm])
-    mae = np.mean(abs_m)
-    rmse = np.sqrt(np.mean(diff_m**2))
-    valid_mape = np.abs(y_true[dm]) > 0.1
-    mape = np.mean(abs_m[valid_mape] / np.abs(y_true[dm][valid_mape])) * 100.0 if np.any(valid_mape) else 0.0
-    
-    # Advanced Metrics (R^2, SSIM, GradCorr)
-    gt_m = y_true[dm]
-    ss_res = np.sum(diff_m ** 2)
-    ss_tot = np.sum((gt_m - np.mean(gt_m)) ** 2)
-    r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-12 else 0.0
+    if has_gt:
+        dm = ~outside
+        diff_m, abs_m = diff_vis[dm], np.abs(diff_vis[dm])
+        mae = np.mean(abs_m)
+        rmse = np.sqrt(np.mean(diff_m**2))
+        valid_mape = np.abs(y_true[dm]) > 0.1
+        mape = np.mean(abs_m[valid_mape] / np.abs(y_true[dm][valid_mape])) * 100.0 if np.any(valid_mape) else 0.0
+        
+        gt_m = y_true[dm]
+        ss_res = np.sum(diff_m ** 2)
+        ss_tot = np.sum((gt_m - np.mean(gt_m)) ** 2)
+        r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-12 else 0.0
 
-    try:
-        from skimage.metrics import structural_similarity
-        ssim_val = structural_similarity(y_true, y_pred, data_range=max(y_true.max(), y_pred.max()) - min(y_true.min(), y_pred.min()))
-        ssim_str = f"{ssim_val:.3f}"
-    except ImportError:
-        ssim_str = "N/A"
+        try:
+            from skimage.metrics import structural_similarity
+            ssim_val = structural_similarity(y_true, y_pred, data_range=max(y_true.max(), y_pred.max()) - min(y_true.min(), y_pred.min()))
+            ssim_str = f"{ssim_val:.3f}"
+        except:
+            ssim_str = "N/A"
 
-    def _grad_corr(pred, true, mask):
-        pdx = np.diff(pred, axis=1, prepend=pred[:, :1])
-        pdy = np.diff(pred, axis=0, prepend=pred[:1, :])
-        tdx = np.diff(true, axis=1, prepend=true[:, :1])
-        tdy = np.diff(true, axis=0, prepend=true[:1, :])
-        pg = np.concatenate([pdx.flatten(), pdy.flatten()])
-        tg = np.concatenate([tdx.flatten(), tdy.flatten()])
-        mm = np.concatenate([mask.flatten(), mask.flatten()])
-        pg, tg = pg[mm], tg[mm]
-        if np.std(pg) < 1e-8 or np.std(tg) < 1e-8: return 0.0
-        return np.corrcoef(pg, tg)[0, 1]
+        def _grad_corr(pred, true, mask):
+            pdx = np.diff(pred, axis=1, prepend=pred[:, :1])
+            pdy = np.diff(pred, axis=0, prepend=pred[:1, :])
+            tdx = np.diff(true, axis=1, prepend=true[:, :1])
+            tdy = np.diff(true, axis=0, prepend=true[:1, :])
+            pg = np.concatenate([pdx.flatten(), pdy.flatten()])
+            tg = np.concatenate([tdx.flatten(), tdy.flatten()])
+            mm = np.concatenate([mask.flatten(), mask.flatten()])
+            pg, tg = pg[mm], tg[mm]
+            if np.std(pg) < 1e-8 or np.std(tg) < 1e-8: return 0.0
+            return np.corrcoef(pg, tg)[0, 1]
 
-    grad_corr = _grad_corr(y_pred, y_true, dm)
-
-    line1 = f"MAE:{mae:.3f} | RMSE:{rmse:.3f} | MAPE:{mape:.1f}%"
-    line2 = f"SSIM:{ssim_str} | GradCorr:{grad_corr:.3f} | R²:{r2:.3f}"
+        grad_corr = _grad_corr(y_pred, y_true, dm)
+        line1 = f"MAE:{mae:.3f} | RMSE:{rmse:.3f} | MAPE:{mape:.1f}%"
+        line2 = f"SSIM:{ssim_str} | GradCorr:{grad_corr:.3f} | R²:{r2:.3f}"
+    else:
+        line1 = "MAE:N/A | RMSE:N/A | MAPE:N/A"
+        line2 = "SSIM:N/A | GradCorr:N/A | R²:N/A"
     
     # --- COLORBARS AND METRICS ---
-    # 1. Shared colorbar centered under Ground Truth (ax1) and Prediction (ax2)
     pos1 = ax1.get_position()
     pos2 = ax2.get_position()
     x_center_top = (pos1.x0 + pos2.x1) / 2.0
     
-    cb_w = 0.16  # Fixed width
+    cb_w = 0.16 
     cb_h = 0.025
-    cb_y = pos1.y0 - 0.16 # Significantly lower to clear the circles
+    cb_y = pos1.y0 - 0.16 
     
     cax_shared = fig.add_axes([x_center_top - cb_w/2, cb_y, cb_w, cb_h])
     fig.colorbar(im1, cax=cax_shared, orientation="horizontal")
     
-    # 2. Diff colorbar centered under Diff Panel (ax3)
     pos3 = ax3.get_position()
-    # Nudge more to the right (+0.03) to perfectly align with panel 4
     x_center_diff = pos3.x0 + pos3.width / 2.0 + 0.065
-
-
     
     cax_diff = fig.add_axes([x_center_diff - cb_w/2, cb_y, cb_w, cb_h])
     fig.colorbar(im3, cax=cax_diff, orientation="horizontal")
 
-    # 3. Metrics text centered under Diff Panel, below colorbar
     metrics_y = cb_y - 0.12
     fig.text(x_center_diff, metrics_y, f"{line1}\n{line2}", 
              ha="center", va="top", fontsize=9, family="monospace", 
@@ -171,6 +173,7 @@ def save_pred_vs_true(y_pred, y_true, out_path, x_input):
     plt.tight_layout(pad=1.5)
     plt.savefig(out_path, dpi=150, bbox_inches="tight", pad_inches=0.15)
     plt.close()
+
 
 def load_weights(path, device):
     checkpoint = torch.load(path, map_location=device, weights_only=False)
@@ -230,7 +233,12 @@ def process_single_csv(csv_path, model, DEVICE, output_dir=None):
             
     try:
         t_col = next((c for c in ["mag_U", "actual_U", "mag_U_dimensionless"] if c in df.columns))
-        t_flat = df[t_col].to_numpy()
+        t_flat = df[t_col].to_numpy().copy()
+        # Fix noise in Ground Truth (inf or NaN)
+        bad_mask = ~np.isfinite(t_flat)
+        if np.any(bad_mask):
+            print(f"  Warning: Found {np.sum(bad_mask)} non-finite values in Ground Truth. Zeroing them out for metrics.")
+            t_flat[bad_mask] = 0.0
     except StopIteration:
         print("Warning: Ground truth target wind 'mag_U' not found in CSV. Visual Error plot will be skipped.")
         t_flat = None
@@ -250,6 +258,13 @@ def process_single_csv(csv_path, model, DEVICE, output_dir=None):
     u_ref_flat = df["U_over_Uref"].to_numpy()
     p_mag_flat = np.clip(u_ref_flat * (p_delta_flat + 1.0), 0.0, None)
     
+    # 0. PHYSICAL MASKING (Brutalize ghost winds inside buildings)
+    is_inside_building = df['Bldg_height'] > (df['Z_relative'] + 0.01) # Add tiny epsilon
+    if np.any(is_inside_building):
+        n_masked = np.sum(is_inside_building)
+        p_mag_flat[is_inside_building] = 0.0
+        print(f"  -> Applied building mask to {n_masked} points.")
+    
     # 1. SAVE CSV
     df_out = df.copy()
     df_out['mag_U_pred'] = p_mag_flat  # Use exact same column header as CT
@@ -267,7 +282,7 @@ def process_single_csv(csv_path, model, DEVICE, output_dir=None):
     df_out.to_csv(csv_out, index=False)
     print(f"  -> Saved Grasshopper CSV Map: {csv_out}")
 
-    # 2. SAVE PNG VISUALS (Exact Match to Conditional Transformer format)
+    # 2. SAVE PNG VISUALS 
     p_mag_grid = np.zeros((ny, nx))
     target_mag = np.zeros((ny, nx)) if t_flat is not None else None
     
@@ -276,11 +291,16 @@ def process_single_csv(csv_path, model, DEVICE, output_dir=None):
         if target_mag is not None:
             target_mag[iy, ix] = t_flat[i]
             
-    if target_mag is not None:
-        save_pred_vs_true(p_mag_grid, target_mag, png_out, X_batch[0].numpy())
-        print(f"  -> Saved Visual Plot: {png_out}")
+    # Always save visuals, even if GT is missing
+    if target_mag is None:
+        target_mag = np.zeros_like(p_mag_grid)
+        has_gt = False
     else:
-        print("Skipped visual plot generation because test CSV lacks ground truth.")
+        has_gt = True
+        
+    save_pred_vs_true(p_mag_grid, target_mag, png_out, X_batch[0].numpy(), has_gt=has_gt)
+    print(f"  -> Saved Visual Plot: {png_out}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="FNO CSV Exporter matching Transformer Format")
