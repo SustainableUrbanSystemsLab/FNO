@@ -134,6 +134,105 @@ class Pix2PixHDInferenceWrapper(nn.Module):
         return y
 
 
+class HybridFNOInferenceWrapper(nn.Module):
+    """
+    Wraps HybridFNO so it accepts the SAME raw Pix2PixHD-layout input and
+    produces the SAME raw wind-speed output.  All preprocessing (channel
+    reorder, physical normalization, building-centred coords) and
+    postprocessing (delta_u -> mag_U) are baked into the graph.
+
+    Raw input layout  (Pix2PixHD / C# plugin order):
+        Ch0: X_coords       (raw metres)
+        Ch1: Y_coords       (raw metres)
+        Ch2: Z_relative     (raw)
+        Ch3: SDF            (raw metres, negative inside buildings)
+        Ch4: Bldg_height    (raw metres)
+        Ch5: U_over_Uref    (per-pixel, dimensionless)
+        Ch6: dir_sin        (-1 to 1)
+        Ch7: dir_cos        (-1 to 1)
+
+    FNO internal layout:
+        Ch0: SDF / 200
+        Ch1: Bldg_height / 50
+        Ch2: Z_relative / 10
+        Ch3: U_over_Uref * 2
+        Ch4: (X - x_centre_of_bldgs) / 500
+        Ch5: (Y - y_centre_of_bldgs) / 500
+        Ch6: dir_sin
+        Ch7: dir_cos
+
+    Output:
+        mag_U  =  U_over_Uref * (1 + delta_u)   [raw wind speed, same unit as Pix2PixHD]
+    """
+
+    # Raw input channel indices (Pix2PixHD order)
+    _R_X   = 0
+    _R_Y   = 1
+    _R_Z   = 2
+    _R_SDF = 3
+    _R_BH  = 4
+    _R_U   = 5
+    _R_SIN = 6
+    _R_COS = 7
+
+    def __init__(self, model: nn.Module):
+        super().__init__()
+        self.model = model
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, 8, H, W) in raw Pix2PixHD layout
+
+        # --- 1. Extract raw channels ---
+        x_coord   = x[:, self._R_X:self._R_X+1]    # (B,1,H,W)
+        y_coord   = x[:, self._R_Y:self._R_Y+1]
+        z_rel     = x[:, self._R_Z:self._R_Z+1]
+        sdf_raw   = x[:, self._R_SDF:self._R_SDF+1]
+        bldg_h    = x[:, self._R_BH:self._R_BH+1]
+        u_over    = x[:, self._R_U:self._R_U+1]
+        dir_sin   = x[:, self._R_SIN:self._R_SIN+1]
+        dir_cos   = x[:, self._R_COS:self._R_COS+1]
+
+        # --- 2. Building-centred coordinates ---
+        # Compute per-sample building centroid from bldg_h > 0 mask.
+        # To keep the graph fully static (no data-dependent indexing which
+        # breaks ONNX tracing), we use a weighted-mean formulation:
+        #   x_centre = sum(x * mask) / (sum(mask) + eps)
+        bldg_mask = (bldg_h > 0).float()                     # (B,1,H,W)
+        mask_sum  = bldg_mask.sum(dim=(2, 3), keepdim=True).clamp(min=1.0)
+        x_centre  = (x_coord * bldg_mask).sum(dim=(2, 3), keepdim=True) / mask_sum
+        y_centre  = (y_coord * bldg_mask).sum(dim=(2, 3), keepdim=True) / mask_sum
+
+        # Fallback: if no buildings at all, centre on domain mean
+        # (rare in practice, but keeps numerics sane)
+        no_bldg   = (mask_sum <= 1.0).float()
+        domain_xc = x_coord.mean(dim=(2, 3), keepdim=True)
+        domain_yc = y_coord.mean(dim=(2, 3), keepdim=True)
+        x_centre  = x_centre * (1.0 - no_bldg) + domain_xc * no_bldg
+        y_centre  = y_centre * (1.0 - no_bldg) + domain_yc * no_bldg
+
+        # --- 3. Assemble FNO input (channel reorder + physical norm) ---
+        fno_input = torch.cat([
+            sdf_raw / 200.0,                       # Ch0
+            bldg_h  / 50.0,                        # Ch1
+            z_rel   / 10.0,                        # Ch2
+            u_over  * 2.0,                         # Ch3
+            (x_coord - x_centre) / 500.0,          # Ch4
+            (y_coord - y_centre) / 500.0,          # Ch5
+            dir_sin,                               # Ch6
+            dir_cos,                               # Ch7
+        ], dim=1)  # (B, 8, H, W)
+
+        # --- 4. Forward through HybridFNO ---
+        delta_u = self.model(fno_input)             # (B, 1, H, W)
+
+        # --- 5. Post-process: delta_u -> mag_U ---
+        # delta_u = (mag_U - U_ref) / U_ref   =>   mag_U = U_ref * (1 + delta_u)
+        # U_ref here is per-pixel U_over_Uref (which IS the local reference speed).
+        mag_U = u_over * (1.0 + delta_u)
+
+        return mag_U
+
+
 def load_stats(stats_path):
     """Load normalization statistics."""
     if not os.path.exists(stats_path):
@@ -530,7 +629,11 @@ def _replace_spectral_convs(model, H, W):
 def export_hybrid(args):
     """Export HybridFNO to ONNX.
 
-    The model takes a single (B, 8, H, W) input and returns (B, 1, H, W) delta_u.
+    With --bake-norm the exported graph accepts the SAME raw Pix2PixHD-layout
+    input (8 channels in the C# order) and outputs raw wind speed mag_U.
+    Without --bake-norm the graph expects pre-normalised FNO-layout input and
+    emits delta_u.
+
     H and W are fixed - ONNX spatial dims are NOT dynamic because the FNO's
     spectral modes and grid positional embedding depend on fixed grid size.
 
@@ -582,10 +685,10 @@ def export_hybrid(args):
     model.eval()
 
     # Verify forward pass works before weight replacement
-    dummy_input = torch.randn(1, X_CH, IMG_H, IMG_W)
-    print(f"Input shape: {dummy_input.shape}")
+    dummy_fno_input = torch.randn(1, X_CH, IMG_H, IMG_W)
+    print(f"FNO-layout input shape: {dummy_fno_input.shape}")
     with torch.no_grad():
-        out_ref = model(dummy_input)
+        out_ref = model(dummy_fno_input)
     print(f"Output shape: {out_ref.shape}")
 
     # Replace complex SpectralConv layers with real-arithmetic equivalents
@@ -595,11 +698,25 @@ def export_hybrid(args):
 
     # Sanity check: outputs must match the original model
     with torch.no_grad():
-        out_real = model(dummy_input)
+        out_real = model(dummy_fno_input)
     max_diff = (out_ref - out_real).abs().max().item()
     print(f"  Max diff after replacement: {max_diff:.2e}")
     if max_diff > 1e-3:
         raise RuntimeError(f"Real-matmul replacement produced large error ({max_diff:.2e}). Aborting.")
+
+    # Optionally wrap with preprocessing + postprocessing so the ONNX graph
+    # accepts raw Pix2PixHD-layout input and emits raw mag_U output.
+    bake_norm = getattr(args, "bake_norm", False)
+    if bake_norm:
+        print("Baking preprocessing+postprocessing into the model")
+        print("  Input:  raw Pix2PixHD-layout (X,Y,Z,SDF,BldgH,U_over,sin,cos)")
+        print("  Output: raw mag_U (same as Pix2PixHD)")
+        model = HybridFNOInferenceWrapper(model)
+        model.eval()
+
+    # Build the dummy input for export
+    # When baked, input is in raw Pix2PixHD layout; otherwise FNO-layout.
+    dummy_input = torch.randn(1, X_CH, IMG_H, IMG_W)
 
     print(f"Exporting to {args.output} ...")
     # dynamo=True uses torch.export + onnxscript. verbose=False suppresses
@@ -629,8 +746,16 @@ def export_hybrid(args):
         "modes": [modes1, modes2],
         "width": width,
         "n_layers": n_layers,
-        "note": "Output is delta_u = (mag_U - U_ref) / U_ref, clipped [-2, 10]",
+        "normalization_baked_in": bake_norm,
     }
+    if bake_norm:
+        export_meta["note"] = (
+            "Input is raw Pix2PixHD-layout (X,Y,Z_rel,SDF,BldgH,U_over_Uref,sin,cos). "
+            "Output is raw mag_U. Preprocessing (channel reorder, physical norm, "
+            "building-centred coords) and postprocessing (delta_u -> mag_U) are baked in."
+        )
+    else:
+        export_meta["note"] = "Output is delta_u = (mag_U - U_ref) / U_ref, clipped [-2, 10]"
     with open(config_out, "w") as f:
         json.dump(export_meta, f, indent=2)
     print(f"Saved export config: {config_out}")
