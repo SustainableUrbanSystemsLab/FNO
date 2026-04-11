@@ -15,3 +15,4 @@ training_logs/
 logs/
 *.8229ea4dc89746480afc4943e179f730
 config.local.toml
+*.onnx
