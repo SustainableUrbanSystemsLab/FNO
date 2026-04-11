@@ -705,7 +705,7 @@ def _replace_fno2d_spectral_convs(model, H, W):
     return model
 
 
-def export_fno(args):
+def export_fno_variants(args):
     """Unified Export for Standard, Hybrid, PINN, and Geo FNO Models."""
     import sys, os
     sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
