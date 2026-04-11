@@ -778,7 +778,7 @@ def export_hybrid(args):
     print(f"Exported: {args.output} ({file_size:.1f} MB)")
 
     if args.verify:
-        verify_onnx(args.output, model, dummy_input)
+        verify_onnx(args.output, export_model, dummy_input)
 
     # Save metadata
     config_out = os.path.splitext(args.output)[0] + "_config.json"
