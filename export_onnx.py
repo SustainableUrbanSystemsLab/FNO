@@ -134,6 +134,39 @@ class Pix2PixHDInferenceWrapper(nn.Module):
         return y
 
 
+class CleanHybridFNOForward(nn.Module):
+    """
+    Wraps HybridFNO to bypass neuralop's state_dict hooks, which inject dict
+    values (like _metadata) that break standard torch.onnx.export (tracing).
+    """
+    def __init__(self, inner):
+        super().__init__()
+        # Manually extract submodules to avoid neuralop hooks
+        self.fno_embedding = inner.fno.positional_embedding
+        self.fno_lifting = inner.fno.lifting
+        self.fno_blocks = inner.fno.fno_blocks
+        self.fno_projection = inner.fno.projection
+        self.attention = inner.attention
+        self.refinement = inner.refinement
+        self.n_layers = inner.fno.n_layers
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        sdf = x[:, 0:1]
+        baseline = x[:, 3:4]
+        
+        # FNO forward pass bypassing the top-level FNO module
+        x_fno = self.fno_embedding(x)
+        x_fno = self.fno_lifting(x_fno)
+        for i in range(self.n_layers):
+            x_fno = self.fno_blocks(x_fno, i)
+        x_fno = self.fno_projection(x_fno)
+        
+        # HybridFNO refinement
+        feat = self.attention(x_fno)
+        combined = torch.cat([feat, sdf, baseline], dim=1)
+        return self.refinement(combined)
+
+
 class HybridFNOInferenceWrapper(nn.Module):
     """
     Wraps HybridFNO so it accepts the SAME raw Pix2PixHD-layout input and
@@ -696,9 +729,18 @@ def export_hybrid(args):
     model = _replace_spectral_convs(model, IMG_H, IMG_W)
     model.eval()
 
+    # Find all neuralop metadata modules and remove custom save dict hooks to allow tracing
+    for name, mod in model.named_modules():
+        if hasattr(mod, '_save_to_state_dict') and type(mod)._save_to_state_dict is not nn.Module._save_to_state_dict:
+            mod._save_to_state_dict = nn.Module._save_to_state_dict.__get__(mod, type(mod))
+
+    # Wrap the model in our clean delegator to avoid _metadata state_dict issues
+    clean_model = CleanHybridFNOForward(model)
+    clean_model.eval()
+
     # Sanity check: outputs must match the original model
     with torch.no_grad():
-        out_real = model(dummy_fno_input)
+        out_real = clean_model(dummy_fno_input)
     max_diff = (out_ref - out_real).abs().max().item()
     print(f"  Max diff after replacement: {max_diff:.2e}")
     if max_diff > 1e-3:
@@ -711,24 +753,26 @@ def export_hybrid(args):
         print("Baking preprocessing+postprocessing into the model")
         print("  Input:  raw Pix2PixHD-layout (X,Y,Z,SDF,BldgH,U_over,sin,cos)")
         print("  Output: raw mag_U (same as Pix2PixHD)")
-        model = HybridFNOInferenceWrapper(model)
-        model.eval()
+        export_model = HybridFNOInferenceWrapper(clean_model)
+        export_model.eval()
+    else:
+        export_model = clean_model
 
     # Build the dummy input for export
     # When baked, input is in raw Pix2PixHD layout; otherwise FNO-layout.
-    dummy_input = torch.randn(1, X_CH, IMG_H, IMG_W)
+    dummy_input = torch.randn(1, 8, IMG_H, IMG_W)
 
     print(f"Exporting to {args.output} ...")
-    # dynamo=True uses torch.export + onnxscript. verbose=False suppresses
-    # emoji-laden log lines that crash Windows consoles via wandb's cp1252 capture.
     with torch.no_grad():
-        onnx_program = torch.onnx.export(
-            model,
-            (dummy_input,),
-            dynamo=True,
-            verbose=False,
+        torch.onnx.export(
+            export_model,
+            dummy_input,
+            args.output,
+            opset_version=17,
+            input_names=["input"],
+            output_names=["mag_U"] if bake_norm else ["delta_u"],
+            do_constant_folding=True,
         )
-    onnx_program.save(args.output)
 
     file_size = os.path.getsize(args.output) / (1024 * 1024)
     print(f"Exported: {args.output} ({file_size:.1f} MB)")

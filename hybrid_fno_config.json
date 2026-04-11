@@ -10,5 +10,6 @@
   ],
   "width": 128,
   "n_layers": 4,
-  "note": "Output is delta_u = (mag_U - U_ref) / U_ref, clipped [-2, 10]"
+  "normalization_baked_in": true,
+  "note": "Input is raw Pix2PixHD-layout (X,Y,Z_rel,SDF,BldgH,U_over_Uref,sin,cos). Output is raw mag_U. Preprocessing (channel reorder, physical norm, building-centred coords) and postprocessing (delta_u -> mag_U) are baked in."
 }
