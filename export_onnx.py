@@ -2,11 +2,12 @@
 """
 Export trained PyTorch models to ONNX format.
 =============================================
-Converts existing .pt/.pth checkpoints to ONNX — no retraining needed.
+Converts existing .pt/.pth checkpoints to ONNX - no retraining needed.
 
 Supports:
-  - Pix2PixHD Generator (single forward pass → clean ONNX export)
+  - Pix2PixHD Generator (single forward pass -> clean ONNX export)
   - WindTransformer Denoiser (exports the denoiser; DDIM loop runs in server code)
+  - HybridFNO (spectral conv replaced with real matmul for DML-compatible export)
 
 Usage:
   # Pix2PixHD
@@ -112,8 +113,8 @@ def build_windtransformer_denoiser(config=None, patch_size=None):
 class Pix2PixHDInferenceWrapper(nn.Module):
     """
     Wraps the Pix2PixHD generator with normalization baked in.
-    Input:  raw X tensor (8, H, W) — unnormalized
-    Output: raw wind field (1, H, W) — denormalized
+    Input:  raw X tensor (8, H, W) - unnormalized
+    Output: raw wind field (1, H, W) - denormalized
     """
     def __init__(self, generator, x_mean, x_std, y_mean, y_std):
         super().__init__()
@@ -157,7 +158,7 @@ def export_pix2pixhd(args):
     # Build model
     model = build_pix2pixhd_generator(config)
 
-    # Load weights — prefer EMA
+    # Load weights - prefer EMA
     if "ema_generator" in ckpt:
         print("Loading EMA generator weights (best quality).")
         model.load_state_dict(ckpt["ema_generator"])
@@ -173,7 +174,7 @@ def export_pix2pixhd(args):
     if args.stats:
         x_mean, x_std, y_mean, y_std = load_stats(args.stats)
         if x_mean is not None and args.bake_norm:
-            print("Baking normalization into the model (raw input → raw output).")
+            print("Baking normalization into the model (raw input -> raw output).")
             model = Pix2PixHDInferenceWrapper(model, x_mean, x_std, y_mean, y_std)
             model.eval()
         elif x_mean is not None:
@@ -210,7 +211,7 @@ def export_pix2pixhd(args):
     )
 
     file_size = os.path.getsize(args.output) / (1024 * 1024)
-    print(f"✓ Exported: {args.output} ({file_size:.1f} MB)")
+    print(f"Exported: {args.output} ({file_size:.1f} MB)")
 
     # Verify
     if args.verify:
@@ -229,7 +230,7 @@ def export_pix2pixhd(args):
     }
     with open(config_out, "w") as f:
         json.dump(export_meta, f, indent=2)
-    print(f"✓ Saved export config: {config_out}")
+    print(f"Saved export config: {config_out}")
 
 
 def export_windtransformer(args):
@@ -237,11 +238,11 @@ def export_windtransformer(args):
 
     NOTE: This exports the denoiser network only. The DDIM sampling loop
     must be implemented in your API server code. The denoiser takes:
-      - x_cond: (B, 8, H, W) — normalized conditioning input
-      - y_t:    (B, 1, H, W) — noisy field at timestep t
-      - t:      (B,)         — integer timestep
+      - x_cond: (B, 8, H, W) - normalized conditioning input
+      - y_t:    (B, 1, H, W) - noisy field at timestep t
+      - t:      (B,)         - integer timestep
     And returns:
-      - eps:    (B, 1, H, W) — predicted noise
+      - eps:    (B, 1, H, W) - predicted noise
     """
     print("=" * 60)
     print("Exporting WindTransformer Denoiser to ONNX")
@@ -293,7 +294,7 @@ def export_windtransformer(args):
     )
 
     file_size = os.path.getsize(args.output) / (1024 * 1024)
-    print(f"✓ Exported: {args.output} ({file_size:.1f} MB)")
+    print(f"Exported: {args.output} ({file_size:.1f} MB)")
 
     # Verify
     if args.verify:
@@ -312,7 +313,7 @@ def export_windtransformer(args):
             }
             with open(stats_out, "w") as f:
                 json.dump(stats_dict, f, indent=2)
-            print(f"✓ Saved normalization stats: {stats_out}")
+            print(f"Saved normalization stats: {stats_out}")
 
     # Save config
     config_out = os.path.splitext(args.output)[0] + "_config.json"
@@ -328,15 +329,221 @@ def export_windtransformer(args):
     }
     with open(config_out, "w") as f:
         json.dump(export_meta, f, indent=2)
-    print(f"✓ Saved export config: {config_out}")
+    print(f"Saved export config: {config_out}")
+
+
+class _RealSpectralConv2d(nn.Module):
+    """
+    SpectralConv replacement using only real matmul + elementwise ops.
+
+    neuralop's SpectralConv computes  irfft2(W * rfft2(x))  with complex
+    weights, which exports to ONNX DFT nodes. DFT is not supported by
+    several runtimes (notably DirectML), so instead this module replaces the
+    FFT with explicit precomputed DFT basis matrices restricted to the
+    (modes1, modes2) selected frequency bins. The resulting graph contains
+    only MatMul / Add / Mul / Reshape / Transpose ops - all widely supported.
+
+    Math
+    ----
+    Let S_u = {-m1/2, ..., m1/2-1} and S_v = {0, ..., m2-1}. We precompute
+    four pairs of (cos, sin) basis matrices:
+
+      A_fwd [m1, H]  forward DFT along H (with 1/H factor from norm=forward)
+      B_fwd [m2, W]  forward DFT along W (with 1/W factor)
+      A_inv [H, m1]  inverse DFT along H
+      B_inv [W, m2]  inverse DFT along W
+
+    and split each into its real / imag components. The spectral conv then
+    becomes a sequence of batched real matmuls. The implicit Hermitian mirror
+    of the one-sided v-spectrum (which irfft2 would fill in automatically)
+    is accounted for analytically via a factor-2 weighting on the v > 0
+    bins - this makes the real part of the truncated inverse equal to the
+    full real-valued inverse transform.
+    """
+
+    def __init__(self, in_ch: int, out_ch: int, modes1: int, modes2: int,
+                 H: int, W: int):
+        super().__init__()
+        self.in_ch = in_ch
+        self.out_ch = out_ch
+        self.modes1 = modes1
+        self.modes2 = modes2
+        self.H = H
+        self.W = W
+        self.weight_r = nn.Parameter(torch.zeros(in_ch, out_ch, modes1, modes2))
+        self.weight_i = nn.Parameter(torch.zeros(in_ch, out_ch, modes1, modes2))
+        self.bias: nn.Parameter | None = None
+
+        # Precompute DFT basis matrices (all real, fixed at init)
+        u_freqs = torch.arange(modes1, dtype=torch.float32) - (modes1 // 2)
+        v_freqs = torch.arange(modes2, dtype=torch.float32)
+        h_idx = torch.arange(H, dtype=torch.float32)
+        w_idx = torch.arange(W, dtype=torch.float32)
+        TWO_PI = 2.0 * torch.pi
+
+        # Forward DFT with norm="forward" bakes 1/(H*W) normalization in.
+        #   A_fwd[u, h] = (1/H) * exp(-2pi*i * u * h / H)
+        ang_h_fwd = -TWO_PI * u_freqs[:, None] * h_idx[None, :] / H   # [m1, H]
+        A_fwd_r = torch.cos(ang_h_fwd) / H
+        A_fwd_i = torch.sin(ang_h_fwd) / H
+        #   B_fwd[v, w] = (1/W) * exp(-2pi*i * v * w / W)
+        ang_w_fwd = -TWO_PI * v_freqs[:, None] * w_idx[None, :] / W   # [m2, W]
+        B_fwd_r = torch.cos(ang_w_fwd) / W
+        B_fwd_i = torch.sin(ang_w_fwd) / W
+
+        # Inverse DFT (no scaling with norm="forward")
+        #   A_inv[h, u] = exp(+2pi*i * u * h / H)
+        ang_h_inv = TWO_PI * h_idx[:, None] * u_freqs[None, :] / H    # [H, m1]
+        A_inv_r = torch.cos(ang_h_inv)
+        A_inv_i = torch.sin(ang_h_inv)
+        #   B_inv[w, v] = exp(+2pi*i * v * w / W)
+        ang_w_inv = TWO_PI * w_idx[:, None] * v_freqs[None, :] / W    # [W, m2]
+        B_inv_r = torch.cos(ang_w_inv)
+        B_inv_i = torch.sin(ang_w_inv)
+
+        # Hermitian-mirror doubling: v=0 unchanged, v>0 contributes twice
+        # (once as itself, once as conjugate at v' = W-v). Nyquist v=W/2 would
+        # also stay at factor 1 but realistic FNO configs never reach it.
+        v_scale = torch.full((modes2,), 2.0, dtype=torch.float32)
+        v_scale[0] = 1.0
+
+        self.register_buffer("A_fwd_r", A_fwd_r)
+        self.register_buffer("A_fwd_i", A_fwd_i)
+        self.register_buffer("B_fwd_r", B_fwd_r)
+        self.register_buffer("B_fwd_i", B_fwd_i)
+        self.register_buffer("A_inv_r", A_inv_r)
+        self.register_buffer("A_inv_i", A_inv_i)
+        self.register_buffer("B_inv_r", B_inv_r)
+        self.register_buffer("B_inv_i", B_inv_i)
+        self.register_buffer("v_scale", v_scale)
+
+    @classmethod
+    def from_complex(cls, in_ch, out_ch, modes1, modes2, w_complex, H, W):
+        """Build from a neuralop complex weight tensor."""
+        m = cls(in_ch, out_ch, modes1, modes2, H, W)
+        m.weight_r.data.copy_(w_complex.real[:in_ch, :out_ch, :modes1, :modes2].contiguous())
+        m.weight_i.data.copy_(w_complex.imag[:in_ch, :out_ch, :modes1, :modes2].contiguous())
+        return m
+
+    @property
+    def n_modes(self):
+        return [self.modes1, self.modes2]
+
+    @n_modes.setter
+    def n_modes(self, value):
+        # FNOBlocks may try to set n_modes; ignore silently (fixed at init).
+        pass
+
+    def transform(self, x: torch.Tensor, output_shape=None) -> torch.Tensor:
+        """Passthrough used by FNOBlocks for resolution changes (none here)."""
+        return x
+
+    def forward(self, x: torch.Tensor, output_shape=None) -> torch.Tensor:
+        B = x.shape[0]
+        C, O = self.in_ch, self.out_ch
+        m1, m2 = self.modes1, self.modes2
+
+        # 1. Forward DFT along H (real input -> complex coeffs at m1 bins)
+        #    x: [B,C,H,W]  ->  [B,C,m1,W]
+        x_u_r = torch.matmul(self.A_fwd_r, x)
+        x_u_i = torch.matmul(self.A_fwd_i, x)
+
+        # 2. Forward DFT along W (m2 one-sided bins)
+        #    x_u [B,C,m1,W] @ B_fwd.T [W,m2]  ->  [B,C,m1,m2]
+        B_fwd_r_t = self.B_fwd_r.transpose(0, 1)
+        B_fwd_i_t = self.B_fwd_i.transpose(0, 1)
+        x_uv_r = torch.matmul(x_u_r, B_fwd_r_t) - torch.matmul(x_u_i, B_fwd_i_t)
+        x_uv_i = torch.matmul(x_u_r, B_fwd_i_t) + torch.matmul(x_u_i, B_fwd_r_t)
+
+        # 3. Spectral weight multiply via batched matmul
+        #    y[b,o,u,v] = sum_i W[i,o,u,v] * x_uv[b,i,u,v]
+        #    Reshape so (u,v) becomes the batch dim of a bmm.
+        xp_r = x_uv_r.permute(2, 3, 0, 1).reshape(m1 * m2, B, C)
+        xp_i = x_uv_i.permute(2, 3, 0, 1).reshape(m1 * m2, B, C)
+        wp_r = self.weight_r.permute(2, 3, 0, 1).reshape(m1 * m2, C, O)
+        wp_i = self.weight_i.permute(2, 3, 0, 1).reshape(m1 * m2, C, O)
+        yp_r = torch.bmm(xp_r, wp_r) - torch.bmm(xp_i, wp_i)
+        yp_i = torch.bmm(xp_r, wp_i) + torch.bmm(xp_i, wp_r)
+        y_uv_r = yp_r.reshape(m1, m2, B, O).permute(2, 3, 0, 1)
+        y_uv_i = yp_i.reshape(m1, m2, B, O).permute(2, 3, 0, 1)
+
+        # 4. Hermitian mirror doubling for v > 0
+        y_uv_r = y_uv_r * self.v_scale
+        y_uv_i = y_uv_i * self.v_scale
+
+        # 5. Inverse DFT along W (m2 -> W)
+        #    y_uv [B,O,m1,m2] @ B_inv.T [m2,W]  ->  [B,O,m1,W]
+        B_inv_r_t = self.B_inv_r.transpose(0, 1)
+        B_inv_i_t = self.B_inv_i.transpose(0, 1)
+        y_uw_r = torch.matmul(y_uv_r, B_inv_r_t) - torch.matmul(y_uv_i, B_inv_i_t)
+        y_uw_i = torch.matmul(y_uv_r, B_inv_i_t) + torch.matmul(y_uv_i, B_inv_r_t)
+
+        # 6. Inverse DFT along H, take real part only (output is real)
+        #    A_inv [H,m1] @ y_uw [B,O,m1,W]  ->  [B,O,H,W]
+        out = torch.matmul(self.A_inv_r, y_uw_r) - torch.matmul(self.A_inv_i, y_uw_i)
+
+        if self.bias is not None:
+            out = out + self.bias
+        return out
+
+
+def _replace_spectral_convs(model, H, W):
+    """
+    Walk the model tree and replace every neuralop SpectralConv module
+    with an equivalent _RealSpectralConv2d whose weights come from the
+    original complex parameters. H, W are the fixed spatial dims of the
+    FNO grid (needed to precompute the DFT basis).
+
+    Returns the mutated model (in-place).
+    """
+    try:
+        from neuralop.layers.spectral_convolution import SpectralConv
+    except ImportError:
+        raise RuntimeError("neuralop not installed; cannot find SpectralConv to replace.")
+
+    def _recurse(parent, name, mod):
+        for child_name, child in list(mod.named_children()):
+            _recurse(mod, child_name, child)
+
+        if isinstance(mod, SpectralConv):
+            # neuralop SpectralConv stores weight under .weight (may be a
+            # FactorizedTensor or a plain Parameter/tensor). Reconstruct it.
+            w = mod.weight
+            if hasattr(w, "to_tensor"):          # FactorizedTensor
+                w = w.to_tensor()
+            elif hasattr(w, "tensor"):            # WrappedParameter
+                w = w.tensor
+            # w shape: [in_ch, out_ch, modes1, modes2]
+            in_ch, out_ch, m1, m2 = w.shape
+            real_conv = _RealSpectralConv2d.from_complex(
+                in_ch, out_ch, m1, m2, w.detach(), H, W
+            )
+            if mod.bias is not None:
+                real_conv.bias = nn.Parameter(mod.bias.detach().clone())
+            setattr(parent, name, real_conv)
+
+    for name, child in list(model.named_children()):
+        _recurse(model, name, child)
+    return model
 
 
 def export_hybrid(args):
     """Export HybridFNO to ONNX.
 
     The model takes a single (B, 8, H, W) input and returns (B, 1, H, W) delta_u.
-    H and W are fixed — ONNX spatial dims are NOT dynamic because the FNO's
+    H and W are fixed - ONNX spatial dims are NOT dynamic because the FNO's
     spectral modes and grid positional embedding depend on fixed grid size.
+
+    Strategy
+    --------
+    neuralop's SpectralConv stores spectral weights as complex64 and performs
+    the frequency-domain product with a complex einsum wrapped around FFT ops.
+    Complex tensors have no ONNX representation, and even after splitting into
+    real/imag, the resulting DFT nodes are not supported by DirectML and some
+    other execution providers. We therefore replace every SpectralConv in the
+    loaded model with _RealSpectralConv2d, which implements the identical
+    computation using only precomputed real DFT basis matrices + MatMul,
+    making the full model exportable and runnable on CPU / CUDA / DML.
     """
     import sys, os
     sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -374,19 +581,29 @@ def export_hybrid(args):
     model.load_state_dict(state_dict)
     model.eval()
 
+    # Verify forward pass works before weight replacement
     dummy_input = torch.randn(1, X_CH, IMG_H, IMG_W)
     print(f"Input shape: {dummy_input.shape}")
-
-    # Verify forward pass works before export
     with torch.no_grad():
-        out = model(dummy_input)
-    print(f"Output shape: {out.shape}")
+        out_ref = model(dummy_input)
+    print(f"Output shape: {out_ref.shape}")
+
+    # Replace complex SpectralConv layers with real-arithmetic equivalents
+    print("Replacing SpectralConv with real-matmul modules ...")
+    model = _replace_spectral_convs(model, IMG_H, IMG_W)
+    model.eval()
+
+    # Sanity check: outputs must match the original model
+    with torch.no_grad():
+        out_real = model(dummy_input)
+    max_diff = (out_ref - out_real).abs().max().item()
+    print(f"  Max diff after replacement: {max_diff:.2e}")
+    if max_diff > 1e-3:
+        raise RuntimeError(f"Real-matmul replacement produced large error ({max_diff:.2e}). Aborting.")
 
     print(f"Exporting to {args.output} ...")
-    # Use the dynamo-based exporter (PyTorch 2.5+): it can decompose FFT ops
-    # (fft_rfftn) that the legacy JIT exporter doesn't support.
-    # verbose=False suppresses emoji-containing log lines that crash on
-    # Windows consoles captured by wandb (cp1252 can't encode U+2705).
+    # dynamo=True uses torch.export + onnxscript. verbose=False suppresses
+    # emoji-laden log lines that crash Windows consoles via wandb's cp1252 capture.
     with torch.no_grad():
         onnx_program = torch.onnx.export(
             model,
@@ -424,7 +641,7 @@ def verify_onnx(onnx_path, pytorch_model, dummy_inputs):
     try:
         import onnxruntime as ort
     except ImportError:
-        print("\n⚠ onnxruntime not installed. Skipping verification.")
+        print("\nWARN onnxruntime not installed. Skipping verification.")
         print("  Install with: pip install onnxruntime  (CPU)")
         print("            or: pip install onnxruntime-gpu  (GPU)")
         return
@@ -443,8 +660,8 @@ def verify_onnx(onnx_path, pytorch_model, dummy_inputs):
         pt_out = pt_out[0]
     pt_np = pt_out.numpy()
 
-    # ONNX Runtime inference
-    sess = ort.InferenceSession(onnx_path)
+    # ONNX Runtime inference (CPU EP - known to work with all supported ops)
+    sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
     input_names = [inp.name for inp in sess.get_inputs()]
 
     if isinstance(dummy_inputs, tuple):
@@ -461,11 +678,11 @@ def verify_onnx(onnx_path, pytorch_model, dummy_inputs):
     print(f"  Mean absolute diff: {mean_diff:.2e}")
 
     if max_diff < 1e-4:
-        print("  ✓ ONNX output matches PyTorch (within FP32 tolerance).")
+        print("  OK  ONNX output matches PyTorch (within FP32 tolerance).")
     elif max_diff < 1e-2:
-        print("  ⚠ Small numerical differences (likely FP16 vs FP32). Acceptable for inference.")
+        print("  WARN Small numerical differences (likely FP16 vs FP32). Acceptable for inference.")
     else:
-        print("  ✗ Large differences detected! ONNX export may have issues.")
+        print("  FAIL Large differences detected! ONNX export may have issues.")
 
 
 def main():
@@ -500,7 +717,7 @@ Examples:
     parser.add_argument("--dynamic-batch", action="store_true", default=True,
                         help="Enable dynamic batch size (default: True)")
     parser.add_argument("--bake-norm", action="store_true",
-                        help="Bake normalization into the model (raw→raw I/O)")
+                        help="Bake normalization into the model (raw->raw I/O)")
     parser.add_argument("--verify", action="store_true",
                         help="Verify ONNX output matches PyTorch (requires onnxruntime)")
     parser.add_argument("--patch_size", type=int, default=None,

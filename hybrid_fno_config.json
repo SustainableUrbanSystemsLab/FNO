@@ -1,0 +1,14 @@
+{
+  "arch": "hybrid_fno",
+  "input_channels": 8,
+  "output_channels": 1,
+  "img_h": 504,
+  "img_w": 504,
+  "modes": [
+    48,
+    48
+  ],
+  "width": 128,
+  "n_layers": 4,
+  "note": "Output is delta_u = (mag_U - U_ref) / U_ref, clipped [-2, 10]"
+}
