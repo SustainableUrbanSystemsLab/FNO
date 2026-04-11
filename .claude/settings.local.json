@@ -4,7 +4,9 @@
       "Bash(uv sync:*)",
       "Bash(uv run:*)",
       "Bash(set PYTHONIOENCODING=utf-8)",
-      "Bash(python -c ':*)"
+      "Bash(python -c ':*)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -rn \"stack\\\\|\\\\.cat\\\\|channels\\\\|x_mean\\\\|normaliz\" pipelines/train/hybrid.py core/data/*.py)"
     ]
   }
 }
