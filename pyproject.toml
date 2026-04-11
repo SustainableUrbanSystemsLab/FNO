@@ -11,6 +11,9 @@ dependencies = [
     "tqdm",
     "neuraloperator",
     "matplotlib",
+    "onnxscript",
+    "onnx",
+    "onnxruntime",
 ]
 
 [dependency-groups]

@@ -331,6 +331,94 @@ def export_windtransformer(args):
     print(f"✓ Saved export config: {config_out}")
 
 
+def export_hybrid(args):
+    """Export HybridFNO to ONNX.
+
+    The model takes a single (B, 8, H, W) input and returns (B, 1, H, W) delta_u.
+    H and W are fixed — ONNX spatial dims are NOT dynamic because the FNO's
+    spectral modes and grid positional embedding depend on fixed grid size.
+    """
+    import sys, os
+    sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+    from core.models.hybrid import HybridFNO
+
+    print("=" * 60)
+    print("Exporting HybridFNO to ONNX")
+    print("=" * 60)
+
+    print(f"Loading checkpoint: {args.checkpoint}")
+    ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+
+    # Checkpoint may be a payload dict or a raw state_dict
+    if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+        state_dict = ckpt["model_state_dict"]
+        cfg = ckpt.get("config", {})
+    else:
+        state_dict = ckpt
+        cfg = {}
+
+    modes1, modes2 = cfg.get("modes", (32, 32))
+    width = cfg.get("width", 64)
+    n_layers = cfg.get("n_layers", 4)
+
+    print(f"  modes=({modes1},{modes2}), width={width}, n_layers={n_layers}")
+
+    model = HybridFNO(
+        n_modes=(modes1, modes2),
+        in_channels=X_CH,
+        out_channels=Y_CH,
+        hidden_channels=width,
+        n_layers=n_layers,
+    )
+    state_dict.pop("_metadata", None)
+    model.load_state_dict(state_dict)
+    model.eval()
+
+    dummy_input = torch.randn(1, X_CH, IMG_H, IMG_W)
+    print(f"Input shape: {dummy_input.shape}")
+
+    # Verify forward pass works before export
+    with torch.no_grad():
+        out = model(dummy_input)
+    print(f"Output shape: {out.shape}")
+
+    print(f"Exporting to {args.output} ...")
+    # Use the dynamo-based exporter (PyTorch 2.5+): it can decompose FFT ops
+    # (fft_rfftn) that the legacy JIT exporter doesn't support.
+    # verbose=False suppresses emoji-containing log lines that crash on
+    # Windows consoles captured by wandb (cp1252 can't encode U+2705).
+    with torch.no_grad():
+        onnx_program = torch.onnx.export(
+            model,
+            (dummy_input,),
+            dynamo=True,
+            verbose=False,
+        )
+    onnx_program.save(args.output)
+
+    file_size = os.path.getsize(args.output) / (1024 * 1024)
+    print(f"Exported: {args.output} ({file_size:.1f} MB)")
+
+    if args.verify:
+        verify_onnx(args.output, model, dummy_input)
+
+    # Save metadata
+    config_out = os.path.splitext(args.output)[0] + "_config.json"
+    export_meta = {
+        "arch": "hybrid_fno",
+        "input_channels": X_CH,
+        "output_channels": Y_CH,
+        "img_h": IMG_H, "img_w": IMG_W,
+        "modes": [modes1, modes2],
+        "width": width,
+        "n_layers": n_layers,
+        "note": "Output is delta_u = (mag_U - U_ref) / U_ref, clipped [-2, 10]",
+    }
+    with open(config_out, "w") as f:
+        json.dump(export_meta, f, indent=2)
+    print(f"Saved export config: {config_out}")
+
+
 def verify_onnx(onnx_path, pytorch_model, dummy_inputs):
     """Verify ONNX output matches PyTorch output."""
     try:
@@ -399,7 +487,7 @@ Examples:
       --verify
         """
     )
-    parser.add_argument("--arch", required=True, choices=["pix2pixhd", "windtransformer"],
+    parser.add_argument("--arch", required=True, choices=["pix2pixhd", "windtransformer", "hybrid"],
                         help="Model architecture to export")
     parser.add_argument("--checkpoint", required=True, type=str,
                         help="Path to .pt or .pth checkpoint file")
@@ -436,6 +524,8 @@ Examples:
         export_pix2pixhd(args)
     elif args.arch == "windtransformer":
         export_windtransformer(args)
+    elif args.arch == "hybrid":
+        export_hybrid(args)
 
     print("\n" + "=" * 60)
     print("Export complete!")
