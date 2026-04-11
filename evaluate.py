@@ -169,38 +169,44 @@ def evaluate_csv_dir(csv_dir, model, device):
     return all_metrics
 
 
-class MockOpt:
-    def __init__(self, dataroot):
-        self.dataroot = dataroot
-        self.phase = "test"
-        self.isTrain = False
-        self.no_flip = True
-        self.wind_stats = os.path.join(dataroot, "stats.json")
-        self.input_nc = 8
-        self.output_nc = 1
-        self.n_downsample_global = 4
-        self.netG = "global"
-        self.batchSize = 1
-
-
 def evaluate_npy_dir(dataroot, model, device):
-    """Evaluates the model over a directory of NumPy arrays using WindDataset."""
-    opt = MockOpt(dataroot)
-    try:
-        dataset = WindDataset()
-        dataset.initialize(opt)
-    except ValueError as e:
-        print(f"Error loading dataset: {e}")
+    """Evaluates the model over monolithic X.npy and Y.npy arrays."""
+    x_path = os.path.join(dataroot, "X.npy")
+    y_path = os.path.join(dataroot, "Y.npy")
+    
+    if not os.path.exists(x_path) or not os.path.exists(y_path):
+        print(f"Error: Could not find X.npy and/or Y.npy in {dataroot}")
         return []
-
-    print(f"Loaded {len(dataset)} Numpy samples for evaluation.")
+        
+    print(f"Loading arrays from {dataroot}...")
+    X_val = np.load(x_path)
+    Y_val = np.load(y_path)
+    
+    # If shapes are (N, H, W, C), transpose to (N, C, H, W)
+    if X_val.ndim == 4 and X_val.shape[-1] == 8:
+        X_val = X_val.transpose(0, 3, 1, 2)
+    if Y_val.ndim == 4 and Y_val.shape[-1] == 1:
+        Y_val = Y_val.transpose(0, 3, 1, 2)
+        
+    num_samples = X_val.shape[0]
+    print(f"Loaded {num_samples} Numpy samples (X: {X_val.shape}, Y: {Y_val.shape}) for evaluation.")
+    
+    # (Optional) Attempt to load stats.json for inverse normalization if it exists. 
+    # Otherwise, rely on raw prediction matches assuming they are in the same domain space.
+    stats_path = os.path.join(dataroot, "stats.json")
+    if os.path.exists(stats_path):
+        with open(stats_path, "r") as f:
+            stats = json.load(f)
+        out_min = np.array(stats["output_stats"]["min"])
+        out_max = np.array(stats["output_stats"]["max"])
+    else:
+        out_min, out_max = 0.0, 1.0
+        
     all_metrics = []
 
-    for i in tqdm(range(len(dataset)), desc="Evaluating NPYs"):
-        data = dataset[i]
-        x_tensor = data['label'].unsqueeze(0).to(device)  # [1, 8, H, W]
-        y_true_tensor = data['image'].unsqueeze(0).to(device) # [1, 1, H, W]
-        file_path = data['path']
+    for i in tqdm(range(num_samples), desc="Evaluating NPYs"):
+        x_tensor = torch.from_numpy(X_val[i:i+1]).float().to(device)
+        y_true_tensor = torch.from_numpy(Y_val[i:i+1]).float().to(device)
         
         with torch.no_grad():
             y_pred_tensor = model(x_tensor)
@@ -208,7 +214,7 @@ def evaluate_npy_dir(dataroot, model, device):
         y_pred = y_pred_tensor[0, 0].cpu().numpy()
         y_true = y_true_tensor[0, 0].cpu().numpy()
 
-        # Simple circle mask just like CSV evaluation if H and W map identically
+        # Simple circle mask
         H, W = y_true.shape
         cy_m, cx_m = H // 2, W // 2
         Yc_m, Xc_m = np.ogrid[:H, :W]
@@ -216,7 +222,7 @@ def evaluate_npy_dir(dataroot, model, device):
         mask = ~outside
 
         metrics = get_metrics_for_sample(y_pred, y_true, mask, device=device)
-        metrics['filename'] = os.path.basename(file_path)
+        metrics['filename'] = f"sample_{i:04d}"
         all_metrics.append(metrics)
 
     return all_metrics
