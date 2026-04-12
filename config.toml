@@ -16,7 +16,7 @@ test_folder = 'test_csv'
 model_output = "fno_mag_weights.pth"
 
 [training]
-batch_size = 16
+batch_size = 4
 epochs = 200
 learning_rate = 1e-4
 patience = 50
@@ -27,7 +27,7 @@ val_split = 0.1       # Fraction of data held out for validation (fixed seed=42)
 # Sufficient modes to capture narrow building wakes
 modes1 = 48
 modes2 = 48
-width = 64
+width = 128
 n_layers = 4
 dropout = 0.02
 
