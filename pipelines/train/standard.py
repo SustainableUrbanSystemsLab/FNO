@@ -18,7 +18,7 @@ CONFIG_FILE = "config.toml"
 def load_config():
     """Load configuration from config.toml file."""
     import tomllib  # Python 3.11+ built-in
-    
+
     config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../', CONFIG_FILE))
     if os.path.exists(config_path):
         with open(config_path, 'rb') as f:
@@ -38,7 +38,7 @@ else:
     # Check for PACE vs ICE paths
     pace_path = config.get('paths', {}).get('data_folder_linux', None)
     ice_path = config.get('paths', {}).get('data_folder_ice', None)
-    
+
     if pace_path and os.path.exists(pace_path):
         DATA_FOLDER = pace_path
         print(f"Environment: PACE Cluster detected ({DATA_FOLDER})")
@@ -81,10 +81,10 @@ from core.utils.training_logger import TrainingLogger
 # ... (Config loading remains the same until GRAD_WEIGHT) ...
 # FIX: reduced max weights; physics terms now ramp from 0 over WARMUP_EPOCHS
 # to prevent the model collapsing to a flat constant field early in training.
-GRAD_WEIGHT     = config.get('loss', {}).get('gradient_weight', 0.5)   
+GRAD_WEIGHT     = config.get('loss', {}).get('gradient_weight', 0.5)
 SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
-PEAK_WEIGHT     = config.get('loss', {}).get('peak_weight', 0.3)        
-WAKE_WEIGHT     = config.get('loss', {}).get('wake_weight', 0.3)        
+PEAK_WEIGHT     = config.get('loss', {}).get('peak_weight', 0.3)
+WAKE_WEIGHT     = config.get('loss', {}).get('wake_weight', 0.3)
 WARMUP_EPOCHS   = config.get('loss', {}).get('warmup_epochs', 50)
 
 def get_loss_weights(epoch):
@@ -103,28 +103,28 @@ def get_loss_weights(epoch):
 x_path = os.path.join(DATA_FOLDER, 'X.npy')
 y_path = os.path.join(DATA_FOLDER, 'Y.npy')
 
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--val_dir', type=str, default=None)
-    parser.add_argument('--fresh', action='store_true')
-    _args, _ = parser.parse_known_args()
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--val_dir', type=str, default=None)
+parser.add_argument('--fresh', action='store_true')
+_args, _ = parser.parse_known_args()
 
-<<<<<<< HEAD
-train_dataset_full = NpyDataset(x_path, y_path, augment=True)
-val_dataset_full = NpyDataset(x_path, y_path, augment=False)
-
-# Train/Val split (configurable from config.toml)
-VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
-total_samples = len(train_dataset_full)
-train_size = int((1.0 - VAL_SPLIT) * total_samples)
-val_size = total_samples - train_size
-
-# Fixed seed for deterministic split across nodes
-indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42)).tolist()
-train_idx, val_idx = indices[:train_size], indices[train_size:]
-
-train_dataset = Subset(train_dataset_full, train_idx)
-val_dataset = Subset(val_dataset_full, val_idx)
+if _args.val_dir and os.path.exists(os.path.join(_args.val_dir, 'X.npy')):
+    train_dataset = NpyDataset(x_path, y_path, augment=True)
+    val_dataset = NpyDataset(os.path.join(_args.val_dir, 'X.npy'), os.path.join(_args.val_dir, 'Y.npy'), augment=False)
+    if RANK == 0: print(f"Using explicitly specified val_dir: {_args.val_dir}", flush=True)
+else:
+    full_dataset = NpyDataset(x_path, y_path, augment=True)
+    val_dataset_full = NpyDataset(x_path, y_path, augment=False)
+    VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
+    total_samples = len(full_dataset)
+    train_size = int((1.0 - VAL_SPLIT) * total_samples)
+    val_size = total_samples - train_size
+    indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42)).tolist()
+    from torch.utils.data import Subset
+    train_dataset = Subset(full_dataset, indices[:train_size])
+    val_dataset = Subset(val_dataset_full, indices[train_size:])
+    if RANK == 0: print(f"Using {((1.0 - VAL_SPLIT)*100):.0f}/{VAL_SPLIT*100:.0f} random train/val split natively. Train: {train_size}, Val: {val_size}", flush=True)
 
 if IS_DISTRIBUTED:
     train_sampler = DistributedSampler(train_dataset, num_replicas=WORLD_SIZE, rank=RANK, shuffle=True)
@@ -135,34 +135,6 @@ else:
     train_sampler = None
     loader = DataLoader(train_dataset, batch_size=BATCH, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=BATCH, shuffle=False, num_workers=2)
-=======
-    if _args.val_dir and os.path.exists(os.path.join(_args.val_dir, 'X.npy')):
-        train_dataset = NpyDataset(x_path, y_path, augment=True)
-        val_dataset = NpyDataset(os.path.join(_args.val_dir, 'X.npy'), os.path.join(_args.val_dir, 'Y.npy'), augment=False)
-        if RANK == 0: print(f"Using explicitly specified val_dir: {_args.val_dir}", flush=True)
-    else:
-        full_dataset = NpyDataset(x_path, y_path, augment=True)
-        val_dataset_full = NpyDataset(x_path, y_path, augment=False)
-        VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
-        total_samples = len(full_dataset)
-        train_size = int((1.0 - VAL_SPLIT) * total_samples)
-        val_size = total_samples - train_size
-        indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42)).tolist()
-        from torch.utils.data import Subset
-        train_dataset = Subset(full_dataset, indices[:train_size])
-        val_dataset = Subset(val_dataset_full, indices[train_size:])
-        if RANK == 0: print(f"Using {((1.0 - VAL_SPLIT)*100):.0f}/{VAL_SPLIT*100:.0f} random train/val split natively. Train: {train_size}, Val: {val_size}", flush=True)
-
-    if IS_DISTRIBUTED:
-        train_sampler = DistributedSampler(train_dataset, num_replicas=WORLD_SIZE, rank=RANK, shuffle=True)
-        val_sampler = DistributedSampler(val_dataset, num_replicas=WORLD_SIZE, rank=RANK, shuffle=False)
-        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, num_workers=2, pin_memory=True)
-        val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, num_workers=2, pin_memory=True)
-    else:
-        train_sampler = None
-        loader = DataLoader(train_dataset, batch_size=BATCH, shuffle=True, num_workers=2)
-        val_loader = DataLoader(val_dataset, batch_size=BATCH, shuffle=False, num_workers=2)
->>>>>>> fd0fe5c05207208c33450bd11d7b559ad210fa8e
 
     sample_x, _ = train_dataset[0]
 in_ch = sample_x.shape[0]
@@ -189,7 +161,7 @@ start_epoch = 1
 if os.path.exists(CHECKPOINT_FILE):
     print(f"Resuming from internal checkpoint: {CHECKPOINT_FILE}")
     checkpoint = torch.load(CHECKPOINT_FILE, map_location=DEVICE)
-    
+
     # Handle Full Checkpoint (dict) vs Weights Only (older files)
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -198,7 +170,7 @@ if os.path.exists(CHECKPOINT_FILE):
             opt.load_state_dict(checkpoint['optimizer_state_dict'])
         if 'scheduler_state_dict' in checkpoint:
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            
+
         start_epoch = checkpoint['epoch'] + 1
         best_loss = checkpoint.get('best_loss', float('inf'))
         print(f"Resuming from Epoch {checkpoint['epoch']} (Best Loss: {best_loss:.4f})")
@@ -222,7 +194,7 @@ if RANK == 0:
     full_config['training'] = {'batch_size': BATCH, 'epochs': EPOCHS, 'lr': LR}
     full_config['model'] = {'modes1': MODES1, 'modes2': MODES2, 'width': WIDTH, 'n_layers': N_LAYERS}
     full_config['loss'] = {'grad_weight': GRAD_WEIGHT, 'spectral_weight': SPECTRAL_WEIGHT, 'peak_weight': PEAK_WEIGHT}
-    
+
     logger.start_training(full_config, model=model)
 else:
     logger = None
@@ -240,16 +212,16 @@ def save_feature_importance(model, feature_names, epoch_num=None):
         w = model.in_proj.weight.detach().cpu().numpy()
         importance = np.linalg.norm(w.squeeze(), axis=0)
         importance_pct = 100.0 * importance / importance.sum()
-        
+
         feature_names = list(feature_names)
         indices = np.argsort(importance)[::-1]
-        
+
         # Save to experiment dir instead of root
         filename = os.path.join(logger.experiment_dir, "feature_importance.txt")
         with open(filename, "a") as f: # Append mode to accumulate history
             header = f"\nEpoch {epoch_num} Importance" if epoch_num else "\nFinal Importance"
             f.write(header + "\n" + "-"*30 + "\n")
-            
+
             for i in indices:
                 name = feature_names[i] if i < len(feature_names) else f"Ch_{i}"
                 msg = f"{name:15s}: {importance_pct[i]:.2f}%"
@@ -261,7 +233,7 @@ def save_feature_importance(model, feature_names, epoch_num=None):
 
 for epoch in range(start_epoch, EPOCHS+1):
     model.train(); running=0.0
-    
+
     # Only show progress bar on Rank 0
     if RANK == 0:
         pbar = tqdm(loader, desc=f"Epoch {epoch}/{EPOCHS}", leave=False)
@@ -270,57 +242,57 @@ for epoch in range(start_epoch, EPOCHS+1):
 
     if IS_DISTRIBUTED:
         train_sampler.set_epoch(epoch)
-    
+
     # Accumulators for loss components
     running_mse = 0.0
     running_grad = 0.0
     running_spec = 0.0
     running_peak = 0.0
     running_wake = 0.0
-    
+
     start_time = time.time()
-    
+
     for batch in pbar:
         xb, yb = batch
         xb, yb = xb.to(DEVICE).float(), yb.to(DEVICE).float()
-        
+
         # Build mask from SDF channel
         sdf = xb[:, 0:1, :, :]
         mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
-        
+
         pred = model(xb)
-        
+
         # FIX: use epoch-dependent warmup weights
         w = get_loss_weights(epoch)
-        loss, components = sensor_weighted_mse(pred, yb, sensor_mask=mb, 
-                                             grad_weight=w['grad_weight'], 
-                                             spectral_weight=w['spectral_weight'], 
+        loss, components = sensor_weighted_mse(pred, yb, sensor_mask=mb,
+                                             grad_weight=w['grad_weight'],
+                                             spectral_weight=w['spectral_weight'],
                                              peak_weight=w['peak_weight'],
                                              wake_weight=w['wake_weight'],
                                              return_components=True)
-                                             
+
         opt.zero_grad(); loss.backward(); opt.step()
-        
+
         batch_size = xb.shape[0]
         running += float(loss.item()) * batch_size
-        
+
         # Accumulate components
         running_mse += components['mse_loss'] * batch_size
         running_grad += components['gradient_loss'] * batch_size
         running_spec += components['spectral_loss'] * batch_size
         running_peak += components.get('peak_loss', 0.0) * batch_size
         running_wake += components.get('wake_loss', 0.0) * batch_size
-        
+
         if RANK == 0:
             pbar.set_postfix({"loss": f"{loss.item():.4e}"})
 <<<<<<< HEAD
-    
+
     # --- Validation Pass ---
 =======
-            
+
     if IS_DISTRIBUTED:
         dist.barrier()
-    
+
     # --- EVALUATION PASS ---
 >>>>>>> fd0fe5c05207208c33450bd11d7b559ad210fa8e
     model.eval()
@@ -334,9 +306,9 @@ for epoch in range(start_epoch, EPOCHS+1):
             pred = model(xb)
             w = get_loss_weights(epoch)
 <<<<<<< HEAD
-            v_loss = sensor_weighted_mse(pred, yb, sensor_mask=mb, 
-                                        grad_weight=w['grad_weight'], 
-                                        spectral_weight=w['spectral_weight'], 
+            v_loss = sensor_weighted_mse(pred, yb, sensor_mask=mb,
+                                        grad_weight=w['grad_weight'],
+                                        spectral_weight=w['spectral_weight'],
                                         peak_weight=w['peak_weight'],
                                         wake_weight=w['wake_weight'])
             val_running += float(v_loss.item()) * xb.shape[0]
@@ -352,14 +324,14 @@ for epoch in range(start_epoch, EPOCHS+1):
         running = running_tensor[0].item()
         val_running = running_tensor[1].item()
 >>>>>>> fd0fe5c05207208c33450bd11d7b559ad210fa8e
-        
+
     scheduler.step()
     epoch_time = time.time() - start_time
-    
+
 <<<<<<< HEAD
     n_train = len(train_dataset)
     n_val = len(val_dataset)
-    
+
     # Aggregate losses across GPUs
     if IS_DISTRIBUTED:
         torch.cuda.synchronize()
@@ -384,12 +356,12 @@ for epoch in range(start_epoch, EPOCHS+1):
 =======
     avg_loss = running / len(train_dataset)
     avg_val_loss = val_running / len(val_dataset)
-    
+
     # Calculate average components
     dataset_len = len(train_dataset)
     avg_components = {k: v / dataset_len for k, v in running_comp.items()}
 >>>>>>> fd0fe5c05207208c33450bd11d7b559ad210fa8e
-    
+
     # Prepare metrics for logger
 
 
@@ -413,10 +385,10 @@ for epoch in range(start_epoch, EPOCHS+1):
             if os.path.exists(CHECKPOINT_FILE): os.remove(CHECKPOINT_FILE)
             os.rename(temp_ckpt, CHECKPOINT_FILE)
             print(f"  > Saved rolling full-state checkpoint to {CHECKPOINT_FILE}")
-            
+
             # Save feature importance
             save_feature_importance(model, chs, epoch_num=epoch)
-            
+
     # Check for improvement (Early Stopping)
 <<<<<<< HEAD
 =======
@@ -462,10 +434,10 @@ for epoch in range(start_epoch, EPOCHS+1):
 >>>>>>> fd0fe5c05207208c33450bd11d7b559ad210fa8e
         'learning_rate': opt.param_groups[0]['lr'],
         'epoch_time_sec': epoch_time,
-        'best_loss': best_loss, 
+        'best_loss': best_loss,
         'patience_counter': patience_counter
     }
-    
+
     if RANK == 0:
         logger.log_epoch(epoch, metrics)
 <<<<<<< HEAD

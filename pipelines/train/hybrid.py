@@ -70,13 +70,13 @@ def main():
         else:
             linux_path = config.get('paths', {}).get('data_folder_linux', '')
             ice_path = config.get('paths', {}).get('data_folder_ice', '')
-            
+
             if is_main_process(rank):
                 print(f"[Diag] Raw Config - ICE: {ice_path}, Linux: {linux_path}", file=sys.stderr)
-            
+
             if ice_path: ice_path = os.path.expanduser(ice_path)
             if linux_path: linux_path = os.path.expanduser(linux_path)
-            
+
             def check_path(p, name):
                 if not p: return False
                 exists = os.path.exists(p)
@@ -84,7 +84,7 @@ def main():
                 has_npy = False
                 if exists and isdir:
                     has_npy = os.path.exists(os.path.join(p, "X.npy")) and os.path.exists(os.path.join(p, "Y.npy"))
-                
+
                 if is_main_process(rank):
                     msg = f"[Diag] {name}: {p} | Exists: {exists}, IsDir: {isdir}, HasNPY: {has_npy}"
                     print(msg, flush=True)
@@ -110,7 +110,7 @@ def main():
                     DATA_FOLDER = os.path.join(os.path.dirname(__file__), 'train_csv')
                     if is_main_process(rank):
                         print(f"[Diag] Falling back to local: {DATA_FOLDER}", file=sys.stderr, flush=True)
-                
+
         if is_main_process(rank):
             print(f"Using Data Folder: {os.path.abspath(DATA_FOLDER)}", flush=True)
 
@@ -124,7 +124,7 @@ def main():
         MODES2 = config.get('model', {}).get('modes2', 32)
         WIDTH = config.get('model', {}).get('width', 64)
         N_LAYERS = config.get('model', {}).get('n_layers', 4)
-        
+
         GRAD_WEIGHT = config.get('loss', {}).get('gradient_weight', 0.5)
         SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
         PEAK_WEIGHT = config.get('loss', {}).get('peak_weight', 0.3)
@@ -151,29 +151,29 @@ def main():
         # 3. Data Prep
         x_path = os.path.join(DATA_FOLDER, 'X.npy')
         y_path = os.path.join(DATA_FOLDER, 'Y.npy')
-        
+
         if is_main_process(rank):
             print(f"Loading dataset from {DATA_FOLDER}...")
             print(f"  X path: {x_path}")
             print(f"  Y path: {y_path}")
-            
+
 <<<<<<< HEAD
         train_dataset_full = NpyDataset(x_path, y_path, augment=True)
         val_dataset_full = NpyDataset(x_path, y_path, augment=False)
-        
+
         # Train/Val split (configurable from config.toml)
         VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
         total_samples = len(train_dataset_full)
         train_size = int((1.0 - VAL_SPLIT) * total_samples)
         val_size = total_samples - train_size
-        
+
         # Fixed seed for deterministic split across nodes
         indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42)).tolist()
         train_idx, val_idx = indices[:train_size], indices[train_size:]
-        
+
         train_dataset = Subset(train_dataset_full, train_idx)
         val_dataset = Subset(val_dataset_full, val_idx)
-        
+
         if is_distributed:
             train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
             val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False)
@@ -201,20 +201,20 @@ def main():
             train_dataset = Subset(full_dataset, indices[:train_size])
             val_dataset = Subset(val_dataset_full, indices[train_size:])
             if is_main_process(rank): print(f"Using 90/10 random train/val split natively. Train: {len(train_dataset)}, Val: {len(val_dataset)}", flush=True)
-        
+
         train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank) if is_distributed else None
         val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False) if is_distributed else None
-        
+
         loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=2 if not is_distributed else 1)
         val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, shuffle=False, num_workers=2 if not is_distributed else 1)
 
         # 4. Model & Optimization
         sample_x, _ = train_dataset[0]
 >>>>>>> fd0fe5c05207208c33450bd11d7b559ad210fa8e
-        model = HybridFNO(in_channels=sample_x.shape[0], 
+        model = HybridFNO(in_channels=sample_x.shape[0],
                           n_modes=(MODES1, MODES2),
                           hidden_channels=WIDTH).to(device)
-        
+
         if os.path.exists(MODEL_OUT) and not args.fresh:
             if is_main_process(rank): print(f"Resuming weights: {MODEL_OUT}", flush=True)
             try:
@@ -228,16 +228,16 @@ def main():
                 # Architecture changed: don't load incompatible weights at all
 
         if is_distributed: model = DDP(model, device_ids=[local_rank])
-        
+
         opt = torch.optim.AdamW(model.parameters(), lr=LR)
         # Add scheduler for consistency with standard training
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
-        
+
         l2_loss = LpLoss(d=2, p=2); h1_loss = H1Loss(d=2)
         if is_main_process(rank):
             _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             logger = TrainingLogger(output_dir="training_logs", experiment_name=f"HYBRID_{_ts}")
-        
+
         best_loss = float('inf')
         train_losses = []
         val_losses = []
@@ -282,7 +282,7 @@ def main():
                 running_spec += components['spectral_loss'] * n
                 running_peak += components.get('peak_loss', 0.0) * n
                 running_wake += components.get('wake_loss', 0.0) * n
-            
+
             # --- Validation Pass ---
             model.eval()
             val_running = 0.0
@@ -294,9 +294,9 @@ def main():
                     mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
                     pred = model(xb)
                     w = get_loss_weights(epoch)
-                    v_loss, _ = sensor_weighted_mse(pred, yb, sensor_mask=mb, 
-                                                grad_weight=w['grad_weight'], 
-                                                spectral_weight=w['spectral_weight'], 
+                    v_loss, _ = sensor_weighted_mse(pred, yb, sensor_mask=mb,
+                                                grad_weight=w['grad_weight'],
+                                                spectral_weight=w['spectral_weight'],
                                                 peak_weight=w['peak_weight'],
                                                 wake_weight=w['wake_weight'],
                                                 return_components=True)
@@ -307,7 +307,7 @@ def main():
                 dist.barrier()
 <<<<<<< HEAD
 =======
-            
+
             # --- EVALUATION PASS ---
             model.eval()
             val_running = 0.0
@@ -382,14 +382,14 @@ def main():
                 train_losses.append(avg_loss)
 <<<<<<< HEAD
                 val_losses.append(avg_val_loss)
-                
+
 =======
-                val_losses.append(avg_val_loss) 
+                val_losses.append(avg_val_loss)
 
 >>>>>>> fd0fe5c05207208c33450bd11d7b559ad210fa8e
                 if avg_val_loss < best_loss:
                     best_loss = avg_val_loss
-                    
+
                     # Payload including training history for tools/plot_comparison_curves.py
                     state_dict = model.module.state_dict() if is_distributed else model.state_dict()
                     payload = {
@@ -405,7 +405,7 @@ def main():
                             'n_layers': N_LAYERS
                         }
                     }
-                    
+
                     temp_out = MODEL_OUT + ".tmp"
                     torch.save(payload, temp_out)
                     if os.path.exists(MODEL_OUT): os.remove(MODEL_OUT)

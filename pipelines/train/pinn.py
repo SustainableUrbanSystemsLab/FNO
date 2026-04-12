@@ -109,39 +109,12 @@ def main():
         # --- Dataset ---
         x_path = os.path.join(DATA_FOLDER, 'X.npy')
         y_path = os.path.join(DATA_FOLDER, 'Y.npy')
-        
-<<<<<<< HEAD
+
         if is_main(rank):
             print(f"Loading dataset from {DATA_FOLDER}...")
             print(f"  X path: {x_path}")
             print(f"  Y path: {y_path}")
-            
-        train_dataset_full = NpyDataset(x_path, y_path, augment=True)
-        val_dataset_full = NpyDataset(x_path, y_path, augment=False)
-        
-        # Train/Val split (configurable from config.toml)
-        VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
-        total_samples = len(train_dataset_full)
-        train_size = int((1.0 - VAL_SPLIT) * total_samples)
-        val_size = total_samples - train_size
-        
-        # Fixed seed for deterministic split across nodes
-        indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42)).tolist()
-        train_idx, val_idx = indices[:train_size], indices[train_size:]
-        
-        train_dataset = Subset(train_dataset_full, train_idx)
-        val_dataset = Subset(val_dataset_full, val_idx)
-        
-        if is_distributed:
-            train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
-            val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False)
-            loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, num_workers=2)
-            val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, num_workers=2)
-        else:
-            train_sampler = None
-            loader = DataLoader(train_dataset, batch_size=BATCH, shuffle=True, num_workers=2)
-            val_loader = DataLoader(val_dataset, batch_size=BATCH, shuffle=False, num_workers=2)
-=======
+
         if args.val_dir and os.path.exists(os.path.join(args.val_dir, 'X.npy')):
             train_dataset = NpyDataset(x_path, y_path, augment=True)
             val_dataset = NpyDataset(os.path.join(args.val_dir, 'X.npy'), os.path.join(args.val_dir, 'Y.npy'), augment=False)
@@ -162,7 +135,6 @@ def main():
         val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False) if is_distributed else None
         loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=2)
         val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, shuffle=False, num_workers=2)
->>>>>>> fd0fe5c05207208c33450bd11d7b559ad210fa8e
 
         # --- Model ---
         sample_x, _ = train_dataset[0]
@@ -213,11 +185,11 @@ def main():
             for batch in loader:
                 xb, yb = batch
                 xb, yb = xb.to(device), yb.to(device)
-                
+
                 # Build mask from SDF channel
                 sdf = xb[:, 0:1, :, :]
                 mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
-                
+
                 pred = model(xb)
 
                 loss, comps = pinn_loss(
@@ -266,7 +238,7 @@ def main():
             if is_distributed:
                 torch.cuda.synchronize()
                 dist.barrier()
-            
+
             # --- EVALUATION PASS ---
             model.eval()
             val_running = 0.0
@@ -317,7 +289,7 @@ def main():
 >>>>>>> fd0fe5c05207208c33450bd11d7b559ad210fa8e
                 cont_avg = avgs['continuity_loss']
                 wake_avg = avgs['wake_loss']
-                
+
                 # Log to metrics CSV
                 logger.log_epoch(epoch, {
                     'total_loss': avg_loss,
@@ -329,7 +301,7 @@ def main():
                     'wake_loss': wake_avg,
                     'peak_loss': avgs['peak_loss'],
 <<<<<<< HEAD
-                    'spectral_loss': 0.0, 
+                    'spectral_loss': 0.0,
 =======
                     'spectral_loss': 0.0,
 >>>>>>> fd0fe5c05207208c33450bd11d7b559ad210fa8e
@@ -339,7 +311,7 @@ def main():
                 })
                 train_losses.append(avg_loss)
                 val_losses.append(avg_val_loss)
-                
+
                 print(
                     f"Epoch {epoch:4d}/{EPOCHS} | Loss: {avg_loss:.4e} | Val Loss: {avg_val_loss:.4e} "
                     f"| Cont: {cont_avg:.4e} | Wake: {wake_avg:.4e} | ({dur:.1f}s)",
@@ -349,7 +321,7 @@ def main():
                 if avg_val_loss < best_loss:
                     best_loss = avg_val_loss
                     patience_count = 0
-                    
+
                     # Payload including training history for tools/plot_comparison_curves.py
                     sd = model.module.state_dict() if is_distributed else model.state_dict()
                     payload = {
@@ -365,7 +337,7 @@ def main():
                             'n_layers': config.get('model', {}).get('n_layers', 4)
                         }
                     }
-                    
+
                     temp_out = MODEL_OUT + ".tmp"
                     torch.save(payload, temp_out)
                     if os.path.exists(MODEL_OUT): os.remove(MODEL_OUT)
