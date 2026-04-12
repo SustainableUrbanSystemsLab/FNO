@@ -54,12 +54,12 @@ def main():
     
     if torch.cuda.is_available():
         device = torch.device(f'cuda:{local_rank}')
-        if is_main(rank):
+        if is_main_process(rank):
             print(f"Device: {torch.cuda.get_device_name(device)} (ID: {local_rank})")
             print(f"Free Memory: {torch.cuda.mem_get_info(device)[0]/1024**3:.2f} GB")
     else:
         device = torch.device('cpu')
-        if is_main(rank): print("Warning: No CUDA detected, using CPU.")
+        if is_main_process(rank): print("Warning: No CUDA detected, using CPU.")
 
     try:
         # 1. Path detection
