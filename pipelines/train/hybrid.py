@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, Subset
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 # Local imports
-from core.models.hybrid_fno import HybridFNO
+from core.models.hybrid import HybridFNO
 from core.models.fno2d import sensor_weighted_mse
 from core.utils.training_logger import TrainingLogger
 from core.utils.config_loader import load_config
