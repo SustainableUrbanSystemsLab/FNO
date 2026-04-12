@@ -50,6 +50,9 @@ def is_main(rank):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config.toml')
+    parser.add_argument('--val_dir', type=str, default=None, help='Directory containing validation X.npy/Y.npy')
+    #, type=str, default='config.toml')
+    parser.add_argument('--val_dir', type=str, default=None, help='Directory containing validation X.npy/Y.npy')
     parser.add_argument('--fresh', action='store_true')
     args = parser.parse_args()
 
@@ -240,8 +243,8 @@ def main():
                     flush=True
                 )
 
-                if avg_loss < best_loss:
-                    best_loss = avg_loss
+                if avg_val_loss < best_loss:
+                    best_loss = avg_val_loss
                     patience_count = 0
                     
                     # Payload including training history for tools/plot_comparison_curves.py
