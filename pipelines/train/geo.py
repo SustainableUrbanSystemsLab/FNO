@@ -39,7 +39,7 @@ def cleanup_distributed():
     if dist.is_initialized():
         dist.destroy_process_group()
 
-def is_main_process(rank):
+def is_main(rank):
     return rank == 0
 
 def main():
@@ -54,12 +54,12 @@ def main():
     
     if torch.cuda.is_available():
         device = torch.device(f'cuda:{local_rank}')
-        if is_main_process(rank):
+        if is_main(rank):
             print(f"Device: {torch.cuda.get_device_name(device)} (ID: {local_rank})")
             print(f"Free Memory: {torch.cuda.mem_get_info(device)[0]/1024**3:.2f} GB")
     else:
         device = torch.device('cpu')
-        if is_main_process(rank): print("Warning: No CUDA detected, using CPU.")
+        if is_main(rank): print("Warning: No CUDA detected, using CPU.")
 
     try:
         # 1. Path detection
@@ -104,7 +104,7 @@ def main():
                 'wake_weight': WAKE_W * t,
             }
 
-        if is_main_process(rank):
+        if is_main(rank):
             os.makedirs("epochs", exist_ok=True)
             os.makedirs("training_logs", exist_ok=True)
 
@@ -114,7 +114,7 @@ def main():
         if args.val_dir and os.path.exists(os.path.join(args.val_dir, 'X.npy')):
             train_dataset = NpyDataset(x_path, y_path, augment=True)
             val_dataset = NpyDataset(os.path.join(args.val_dir, 'X.npy'), os.path.join(args.val_dir, 'Y.npy'), augment=False)
-            if is_main_process(rank): print(f"Using manual val_dir: {args.val_dir}")
+            if is_main(rank): print(f"Using manual val_dir: {args.val_dir}")
         else:
             full_dataset = NpyDataset(x_path, y_path, augment=True)
             val_dataset_full = NpyDataset(x_path, y_path, augment=False)
@@ -123,7 +123,7 @@ def main():
             indices = torch.randperm(len(full_dataset), generator=torch.Generator().manual_seed(42)).tolist()
             train_dataset = Subset(full_dataset, indices[:train_size])
             val_dataset = Subset(val_dataset_full, indices[train_size:])
-            if is_main_process(rank): print(f"Using {((1.0-VAL_SPLIT)*100):.0f}/{VAL_SPLIT*100:.0f} native split.")
+            if is_main(rank): print(f"Using {((1.0-VAL_SPLIT)*100):.0f}/{VAL_SPLIT*100:.0f} native split.")
 
         train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank) if is_distributed else None
         val_sampler   = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False) if is_distributed else None
@@ -135,7 +135,7 @@ def main():
         model = GeoFNO(in_channels=sample_x.shape[0], n_modes=(MODES1, MODES2), hidden_channels=WIDTH).to(device)
 
         if os.path.exists(MODEL_OUT) and not args.fresh:
-            if is_main_process(rank): print(f"Loading weights from {MODEL_OUT}")
+            if is_main(rank): print(f"Loading weights from {MODEL_OUT}")
             saved = torch.load(MODEL_OUT, map_location=device, weights_only=False)
             sd = saved['model_state_dict'] if isinstance(saved, dict) and 'model_state_dict' in saved else saved
             model.load_state_dict(sd, strict=True)
@@ -145,7 +145,7 @@ def main():
         opt = torch.optim.AdamW(model.parameters(), lr=LR)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
 
-        if is_main_process(rank):
+        if is_main(rank):
             _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             logger = TrainingLogger(output_dir="training_logs", experiment_name=f"GEO_{_ts}")
             logger.start_training({'batch': BATCH, 'lr': LR, 'modes': (MODES1, MODES2)}, model=model.module if is_distributed else model)
@@ -197,7 +197,7 @@ def main():
             scheduler.step()
             avg_train, avg_val = r_loss/len(train_dataset), v_loss_acc/len(val_dataset)
             
-            if is_main_process(rank):
+            if is_main(rank):
                 print(f"Epoch {epoch}/{EPOCHS} | Train: {avg_train:.4e} | Val: {avg_val:.4e}")
                 logger.log_epoch(epoch, {'total_loss': avg_train, 'val_loss': avg_val, 'best_loss': best_loss})
                 train_hist.append(avg_train); val_hist.append(avg_val)
@@ -216,7 +216,7 @@ def main():
         if is_distributed: cleanup_distributed()
         sys.exit(1)
 
-    if is_main_process(rank):
+    if is_main(rank):
         print(f"Finished. Best Val: {best_loss:.6e}")
         if 'logger' in locals(): logger.finish_training({'best_loss': best_loss})
     cleanup_distributed()
