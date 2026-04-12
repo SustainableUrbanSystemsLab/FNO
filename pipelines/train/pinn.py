@@ -12,7 +12,7 @@ from datetime import datetime
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 # Add project root to sys.path
@@ -114,10 +114,31 @@ def main():
             print(f"  X path: {x_path}")
             print(f"  Y path: {y_path}")
             
-        dataset = NpyDataset(x_path, y_path, augment=True)
+        train_dataset_full = NpyDataset(x_path, y_path, augment=True)
+        val_dataset_full = NpyDataset(x_path, y_path, augment=False)
         
-        sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank) if is_distributed else None
-        loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, shuffle=(sampler is None), num_workers=2)
+        # Train/Val split (configurable from config.toml)
+        VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
+        total_samples = len(train_dataset_full)
+        train_size = int((1.0 - VAL_SPLIT) * total_samples)
+        val_size = total_samples - train_size
+        
+        # Fixed seed for deterministic split across nodes
+        indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42)).tolist()
+        train_idx, val_idx = indices[:train_size], indices[train_size:]
+        
+        train_dataset = Subset(train_dataset_full, train_idx)
+        val_dataset = Subset(val_dataset_full, val_idx)
+        
+        if is_distributed:
+            train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+            val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False)
+            loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, num_workers=2)
+            val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, num_workers=2)
+        else:
+            train_sampler = None
+            loader = DataLoader(train_dataset, batch_size=BATCH, shuffle=True, num_workers=2)
+            val_loader = DataLoader(val_dataset, batch_size=BATCH, shuffle=False, num_workers=2)
 
         # --- Model ---
         sample_x, _ = dataset[0]
@@ -158,7 +179,7 @@ def main():
         val_losses     = []
 
         for epoch in range(1, EPOCHS + 1):
-            if is_distributed: sampler.set_epoch(epoch)
+            if is_distributed: train_sampler.set_epoch(epoch)
             model.train()
             running = 0.0
             comp_accum = {k: 0.0 for k in ['mse_loss','gradient_loss','continuity_loss',
@@ -194,45 +215,69 @@ def main():
                 for k in comp_accum:
                     comp_accum[k] += comps.get(k, 0.0) * bs
 
+            # --- Validation Pass ---
+            model.eval()
+            val_running = 0.0
+            with torch.no_grad():
+                for batch in val_loader:
+                    xb, yb = batch
+                    xb, yb = xb.to(device), yb.to(device)
+                    sdf = xb[:, 0:1, :, :]
+                    mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+                    pred = model(xb)
+                    v_loss, _ = pinn_loss(
+                        pred, yb, x_input=xb, sensor_mask=mb,
+                        grad_weight=GRAD_W,
+                        continuity_weight=CONT_W,
+                        momentum_weight=MOM_W,
+                        wake_weight=WAKE_W,
+                        peak_weight=PEAK_W
+                    )
+                    val_running += v_loss.item() * xb.shape[0]
+
             # Sync across GPUs
             if is_distributed:
                 torch.cuda.synchronize()
                 dist.barrier()
                 keys = ['mse_loss','gradient_loss','continuity_loss','momentum_loss','wake_loss','peak_loss']
-                vals = [running] + [comp_accum[k] for k in keys]
+                vals = [running] + [comp_accum[k] for k in keys] + [val_running]
                 t = torch.tensor(vals, device=device)
                 dist.all_reduce(t, op=dist.ReduceOp.SUM)
                 running = t[0].item()
                 for i, k in enumerate(keys):
                     comp_accum[k] = t[i+1].item()
+                val_running = t[-1].item()
 
             scheduler.step()
-            n = len(dataset)
-            avg_loss = running / n
+            n_train = len(train_dataset)
+            n_val = len(val_dataset)
+            avg_loss = running / n_train
+            avg_val_loss = val_running / n_val
 
             if is_main(rank):
                 dur = time.time() - epoch_start
                 # Calculate averages
-                avgs = {k: comp_accum[k] / n for k in comp_accum}
+                avgs = {k: comp_accum[k] / n_train for k in comp_accum}
                 cont_avg = avgs['continuity_loss']
                 wake_avg = avgs['wake_loss']
                 
                 # Log to metrics CSV
                 logger.log_epoch(epoch, {
                     'total_loss': avg_loss,
+                    'val_loss': avg_val_loss,
                     'mse_loss': avgs['mse_loss'],
                     'gradient_loss': avgs['gradient_loss'],
                     'continuity_loss': cont_avg,
                     'momentum_loss': avgs['momentum_loss'],
                     'wake_loss': wake_avg,
                     'peak_loss': avgs['peak_loss'],
-                    'spectral_loss': 0.0, # PINN does not have spectral loss natively but for tabular alignment
+                    'spectral_loss': 0.0, 
                     'learning_rate': scheduler.get_last_lr()[0],
                     'epoch_time_sec': dur,
                     'best_loss': best_loss
                 })
                 train_losses.append(avg_loss)
-                val_losses.append(avg_loss)
+                val_losses.append(avg_val_loss)
                 
                 print(
                     f"Epoch {epoch:4d}/{EPOCHS} | Loss: {avg_loss:.4e} "
@@ -240,8 +285,8 @@ def main():
                     flush=True
                 )
 
-                if avg_loss < best_loss:
-                    best_loss = avg_loss
+                if avg_val_loss < best_loss:
+                    best_loss = avg_val_loss
                     patience_count = 0
                     
                     # Payload including training history for tools/plot_comparison_curves.py

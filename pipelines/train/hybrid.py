@@ -13,7 +13,7 @@ from datetime import datetime
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, Subset
 from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
 
@@ -156,13 +156,34 @@ def main():
             print(f"  X path: {x_path}")
             print(f"  Y path: {y_path}")
             
-        dataset = NpyDataset(x_path, y_path, augment=True)
+        train_dataset_full = NpyDataset(x_path, y_path, augment=True)
+        val_dataset_full = NpyDataset(x_path, y_path, augment=False)
         
-        sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank) if is_distributed else None
-        loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, shuffle=(sampler is None), num_workers=2 if not is_distributed else 1)
+        # Train/Val split (configurable from config.toml)
+        VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
+        total_samples = len(train_dataset_full)
+        train_size = int((1.0 - VAL_SPLIT) * total_samples)
+        val_size = total_samples - train_size
+        
+        # Fixed seed for deterministic split across nodes
+        indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42)).tolist()
+        train_idx, val_idx = indices[:train_size], indices[train_size:]
+        
+        train_dataset = Subset(train_dataset_full, train_idx)
+        val_dataset = Subset(val_dataset_full, val_idx)
+        
+        if is_distributed:
+            train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+            val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False)
+            loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, num_workers=2)
+            val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, num_workers=2)
+        else:
+            train_sampler = None
+            loader = DataLoader(train_dataset, batch_size=BATCH, shuffle=True, num_workers=2)
+            val_loader = DataLoader(val_dataset, batch_size=BATCH, shuffle=False, num_workers=2)
 
         # 4. Model & Optimization
-        sample_x, _ = dataset[0]
+        sample_x, _ = train_dataset_full[0]
         model = HybridFNO(in_channels=sample_x.shape[0], 
                           n_modes=(MODES1, MODES2),
                           hidden_channels=WIDTH).to(device)
@@ -194,7 +215,7 @@ def main():
         train_losses = []
         val_losses = []
         for epoch in range(1, EPOCHS + 1):
-            if is_distributed: sampler.set_epoch(epoch)
+            if is_distributed: train_sampler.set_epoch(epoch)
             model.train()
             running_loss = 0.0
             running_mse = 0.0
@@ -227,17 +248,37 @@ def main():
 
                 opt.zero_grad(); loss.backward(); opt.step()
                 n = xb.shape[0]
+                n = xb.shape[0]
                 running_loss += loss.item() * n
                 running_mse  += components['mse_loss'] * n
                 running_grad += components['gradient_loss'] * n
                 running_spec += components['spectral_loss'] * n
                 running_peak += components.get('peak_loss', 0.0) * n
                 running_wake += components.get('wake_loss', 0.0) * n
+            
+            # --- Validation Pass ---
+            model.eval()
+            val_running = 0.0
+            with torch.no_grad():
+                for batch in val_loader:
+                    xb, yb = batch
+                    xb, yb = xb.to(device), yb.to(device)
+                    sdf = xb[:, 0:1, :, :]
+                    mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+                    pred = model(xb)
+                    w = get_loss_weights(epoch)
+                    v_loss, _ = sensor_weighted_mse(pred, yb, sensor_mask=mb, 
+                                                grad_weight=w['grad_weight'], 
+                                                spectral_weight=w['spectral_weight'], 
+                                                peak_weight=w['peak_weight'],
+                                                wake_weight=w['wake_weight'],
+                                                return_components=True)
+                    val_running += v_loss.item() * xb.shape[0]
 
             if is_distributed:
                 torch.cuda.synchronize()
                 dist.barrier()
-                running_tensor = torch.tensor([running_loss, running_mse, running_grad, running_spec, running_peak, running_wake], device=device)
+                running_tensor = torch.tensor([running_loss, running_mse, running_grad, running_spec, running_peak, running_wake, val_running], device=device)
                 dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
                 running_loss = running_tensor[0].item()
                 running_mse  = running_tensor[1].item()
@@ -245,23 +286,27 @@ def main():
                 running_spec = running_tensor[3].item()
                 running_peak = running_tensor[4].item()
                 running_wake = running_tensor[5].item()
+                val_running  = running_tensor[6].item()
 
             scheduler.step()
-            n_samples = len(dataset)
-            avg_loss = running_loss / n_samples
-            avg_mse  = running_mse  / n_samples
-            avg_grad = running_grad / n_samples
-            avg_spec = running_spec / n_samples
-            avg_peak = running_peak / n_samples
-            avg_wake = running_wake / n_samples
+            n_train = len(train_dataset)
+            n_val = len(val_dataset)
+            avg_loss = running_loss / n_train
+            avg_mse  = running_mse  / n_train
+            avg_grad = running_grad / n_train
+            avg_spec = running_spec / n_train
+            avg_peak = running_peak / n_train
+            avg_wake = running_wake / n_train
+            avg_val_loss = val_running / n_val
             epoch_duration = time.time() - epoch_start
 
             if is_main_process(rank):
-                print(f"Epoch {epoch}/{EPOCHS} Loss: {avg_loss:.6e}", flush=True)
+                print(f"Epoch {epoch}/{EPOCHS} Loss: {avg_loss:.6e} Val Loss: {avg_val_loss:.6e}", flush=True)
 
                 # Log epoch metrics
                 logger.log_epoch(epoch, {
                     'total_loss': avg_loss,
+                    'val_loss': avg_val_loss,
                     'mse_loss':      avg_mse,
                     'gradient_loss': avg_grad,
                     'spectral_loss': avg_spec,
@@ -272,10 +317,10 @@ def main():
                     'best_loss': best_loss,
                 })
                 train_losses.append(avg_loss)
-                val_losses.append(avg_loss) # Tracking training for now
-
-                if avg_loss < best_loss:
-                    best_loss = avg_loss
+                val_losses.append(avg_val_loss)
+                
+                if avg_val_loss < best_loss:
+                    best_loss = avg_val_loss
                     
                     # Payload including training history for tools/plot_comparison_curves.py
                     state_dict = model.module.state_dict() if is_distributed else model.state_dict()

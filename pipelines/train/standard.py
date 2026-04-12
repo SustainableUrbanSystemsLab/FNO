@@ -4,7 +4,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, Subset
 
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
@@ -108,14 +108,31 @@ if RANK == 0:
     print(f"  X path: {x_path}")
     print(f"  Y path: {y_path}")
 
-dataset = NpyDataset(x_path, y_path, augment=True)
+train_dataset_full = NpyDataset(x_path, y_path, augment=True)
+val_dataset_full = NpyDataset(x_path, y_path, augment=False)
+
+# Train/Val split (configurable from config.toml)
+VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
+total_samples = len(train_dataset_full)
+train_size = int((1.0 - VAL_SPLIT) * total_samples)
+val_size = total_samples - train_size
+
+# Fixed seed for deterministic split across nodes
+indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42)).tolist()
+train_idx, val_idx = indices[:train_size], indices[train_size:]
+
+train_dataset = Subset(train_dataset_full, train_idx)
+val_dataset = Subset(val_dataset_full, val_idx)
 
 if IS_DISTRIBUTED:
-    sampler = DistributedSampler(dataset, num_replicas=WORLD_SIZE, rank=RANK, shuffle=True)
-    loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, num_workers=2, pin_memory=True)
+    train_sampler = DistributedSampler(train_dataset, num_replicas=WORLD_SIZE, rank=RANK, shuffle=True)
+    val_sampler = DistributedSampler(val_dataset, num_replicas=WORLD_SIZE, rank=RANK, shuffle=False)
+    loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, num_workers=2, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, num_workers=2, pin_memory=True)
 else:
-    sampler = None
-    loader = DataLoader(dataset, batch_size=BATCH, shuffle=True, num_workers=2)
+    train_sampler = None
+    loader = DataLoader(train_dataset, batch_size=BATCH, shuffle=True, num_workers=2)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH, shuffle=False, num_workers=2)
 
 sample_x, _ = dataset[0]
 in_ch = sample_x.shape[0]
@@ -215,19 +232,23 @@ def save_feature_importance(model, feature_names, epoch_num=None):
 for epoch in range(start_epoch, EPOCHS+1):
     model.train(); running=0.0
     
-    if IS_DISTRIBUTED:
-        sampler.set_epoch(epoch)
-    
-    # Track components sum
-    running_comp = {'mse_loss': 0.0, 'gradient_loss': 0.0, 'spectral_loss': 0.0, 'peak_loss': 0.0, 'neg_loss': 0.0}
-    
-    start_time = time.time()
-    
     # Only show progress bar on Rank 0
     if RANK == 0:
         pbar = tqdm(loader, desc=f"Epoch {epoch}/{EPOCHS}", leave=False)
     else:
         pbar = loader
+
+    if IS_DISTRIBUTED:
+        train_sampler.set_epoch(epoch)
+    
+    # Accumulators for loss components
+    running_mse = 0.0
+    running_grad = 0.0
+    running_spec = 0.0
+    running_peak = 0.0
+    running_wake = 0.0
+    
+    start_time = time.time()
     
     for batch in pbar:
         xb, yb = batch
@@ -254,21 +275,60 @@ for epoch in range(start_epoch, EPOCHS+1):
         running += float(loss.item()) * batch_size
         
         # Accumulate components
-        for k, v in components.items():
-            if k in running_comp:
-                running_comp[k] += v * batch_size
-                
+        running_mse += components['mse_loss'] * batch_size
+        running_grad += components['gradient_loss'] * batch_size
+        running_spec += components['spectral_loss'] * batch_size
+        running_peak += components.get('peak_loss', 0.0) * batch_size
+        running_wake += components.get('wake_loss', 0.0) * batch_size
+        
         if RANK == 0:
             pbar.set_postfix({"loss": f"{loss.item():.4e}"})
+    
+    # --- Validation Pass ---
+    model.eval()
+    val_running = 0.0
+    with torch.no_grad():
+        for batch in val_loader:
+            xb, yb = batch
+            xb, yb = xb.to(DEVICE).float(), yb.to(DEVICE).float()
+            sdf = xb[:, 0:1, :, :]
+            mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+            pred = model(xb)
+            w = get_loss_weights(epoch)
+            v_loss = sensor_weighted_mse(pred, yb, sensor_mask=mb, 
+                                        grad_weight=w['grad_weight'], 
+                                        spectral_weight=w['spectral_weight'], 
+                                        peak_weight=w['peak_weight'],
+                                        wake_weight=w['wake_weight'])
+            val_running += float(v_loss.item()) * xb.shape[0]
         
     scheduler.step()
     epoch_time = time.time() - start_time
     
-    avg_loss = running/len(dataset)
+    n_train = len(train_dataset)
+    n_val = len(val_dataset)
     
-    # Calculate average components
-    dataset_len = len(dataset)
-    avg_components = {k: v / dataset_len for k, v in running_comp.items()}
+    # Aggregate losses across GPUs
+    if IS_DISTRIBUTED:
+        torch.cuda.synchronize()
+        dist.barrier()
+        running_tensor = torch.tensor([running, running_mse, running_grad, running_spec, running_peak, running_wake, val_running], device=DEVICE)
+        dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
+        running = running_tensor[0].item()
+        running_mse = running_tensor[1].item()
+        running_grad = running_tensor[2].item()
+        running_spec = running_tensor[3].item()
+        running_peak = running_tensor[4].item()
+        running_wake = running_tensor[5].item()
+        val_running = running_tensor[6].item()
+
+    avg_loss = running / n_train
+    avg_mse = running_mse / n_train
+    avg_grad = running_grad / n_train
+    avg_spec = running_spec / n_train
+    avg_peak = running_peak / n_train
+    avg_wake = running_wake / n_train
+    avg_val_loss = val_running / n_val
     
     # Prepare metrics for logger
 
@@ -298,8 +358,8 @@ for epoch in range(start_epoch, EPOCHS+1):
             save_feature_importance(model, chs, epoch_num=epoch)
             
     # Check for improvement (Early Stopping)
-    if avg_loss < best_loss:
-        best_loss = avg_loss
+    if avg_val_loss < best_loss:
+        best_loss = avg_val_loss
         patience_counter = 0
         # Save BEST model to main file
         # Atomic save: save to temp and rename to prevent corruption
@@ -322,11 +382,12 @@ for epoch in range(start_epoch, EPOCHS+1):
     # Prepare metrics for logger (updated with new patience)
     metrics = {
         'total_loss': avg_loss,
-        'mse_loss': avg_components['mse_loss'],
-        'gradient_loss': avg_components['gradient_loss'],
-        'spectral_loss': avg_components['spectral_loss'],
-        'peak_loss': avg_components['peak_loss'],
-        'wake_loss': avg_components.get('wake_loss', 0.0),
+        'val_loss': avg_val_loss,
+        'mse_loss': avg_mse,
+        'gradient_loss': avg_grad,
+        'spectral_loss': avg_spec,
+        'peak_loss': avg_peak,
+        'wake_loss': avg_wake,
         'learning_rate': opt.param_groups[0]['lr'],
         'epoch_time_sec': epoch_time,
         'best_loss': best_loss, 
@@ -335,7 +396,7 @@ for epoch in range(start_epoch, EPOCHS+1):
     
     if RANK == 0:
         logger.log_epoch(epoch, metrics)
-        print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e} (Peak: {avg_components['peak_loss']:.6e})")
+        print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e} val_loss {avg_val_loss:.6e} (Peak: {avg_peak:.6e})")
 
     if 'early_stop' in locals() and early_stop:
         break
