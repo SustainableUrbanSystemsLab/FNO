@@ -83,7 +83,7 @@ class TrainingLogger:
         self.csv_file = open(self.metrics_csv, 'w', newline='')
         self.csv_writer = csv.writer(self.csv_file)
         self.fieldnames = [
-            'epoch', 'total_loss', 'mse_loss', 'gradient_loss', 'spectral_loss', 'peak_loss', 'wake_loss',
+            'epoch', 'total_loss', 'val_loss', 'mse_loss', 'gradient_loss', 'spectral_loss', 'peak_loss', 'wake_loss',
             'learning_rate', 'epoch_time_sec', 'best_loss', 'patience_counter'
         ]
         self.csv_writer.writerow(self.fieldnames)
@@ -206,10 +206,12 @@ def create_publication_plots(metrics_csv: str, output_dir: str = None):
     
     # Plot 1: Total Loss Curve
     fig, ax = plt.subplots()
-    ax.semilogy(df['epoch'], df['total_loss'], 'b-', linewidth=2, label='Total Loss')
+    ax.semilogy(df['epoch'], df['total_loss'], 'b-', linewidth=2, label='Train Loss')
+    if 'val_loss' in df.columns:
+        ax.semilogy(df['epoch'], df['val_loss'], 'r--', linewidth=2, label='Val Loss')
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Loss (log scale)')
-    ax.set_title('Training Loss Curve')
+    ax.set_title('Training & Validation Loss')
     ax.legend()
     fig.tight_layout()
     fig.savefig(os.path.join(output_dir, 'loss_curve.png'), dpi=300, bbox_inches='tight')

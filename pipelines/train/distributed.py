@@ -6,7 +6,7 @@ import os, glob, numpy as np, torch, sys, argparse, time
 from datetime import datetime
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 from multiprocessing import cpu_count
@@ -296,23 +296,37 @@ def main():
         print(f"  X path: {x_path}")
         print(f"  Y path: {y_path}")
     
-    train_dataset = NpyDataset(x_path, y_path, augment=True)
-    in_ch = train_dataset.X.shape[1]  # Should be 8
+    train_dataset_full = NpyDataset(x_path, y_path, augment=True)
+    val_dataset_full = NpyDataset(x_path, y_path, augment=False)
+    
+    # Train/Val split (90/10)
+    total_samples = len(train_dataset_full)
+    train_size = int(0.9 * total_samples)
+    val_size = total_samples - train_size
+    
+    # Fixed seed for deterministic split across nodes
+    indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42)).tolist()
+    train_idx, val_idx = indices[:train_size], indices[train_size:]
+    
+    train_dataset = Subset(train_dataset_full, train_idx)
+    val_dataset = Subset(val_dataset_full, val_idx)
+    
+    in_ch = train_dataset_full.X.shape[1]  # Should be 8
     
     if is_main_process(rank):
         print("=" * 50)
         print("DATASET INITIALIZATION COMPLETE")
         print("=" * 50)
-        print(f"  Total samples: {len(train_dataset)}")
-        print(f"  X shape: {train_dataset.X.shape}")
-        print(f"  Y shape: {train_dataset.Y.shape}")
+        print(f"  Total samples: {total_samples}")
+        print(f"  Train samples: {len(train_dataset)}")
+        print(f"  Val samples:   {len(val_dataset)}")
         print(f"  Input channels: {in_ch}")
-        print(f"  Remap active: {train_dataset.needs_remap}")
+        print(f"  Remap active: {train_dataset_full.needs_remap}")
         
         # Sanity check: run one sample through __getitem__ to show POST-REMAP ranges
         print("  --- Post-remap sample check (sample 0) ---")
         try:
-            sample_x, sample_y = train_dataset[0]
+            sample_x, sample_y = train_dataset_full[0]
             ch_names = ['SDF/200', 'Height/50', 'Z_rel/10', 'U_ref*2', 'X_loc/500', 'Y_loc/500', 'dir_sin', 'dir_cos']
             for ch_idx, ch_name in enumerate(ch_names):
                 ch = sample_x[ch_idx]
@@ -324,12 +338,15 @@ def main():
             traceback.print_exc()
         print("=" * 50)
 
-    # Create DataLoader
+    # Create DataLoaders
     if is_distributed:
-        sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
-        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=sampler, num_workers=NUM_WORKERS)
+        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+        val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False)
+        train_loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, num_workers=NUM_WORKERS)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, num_workers=NUM_WORKERS)
     else:
-        loader = DataLoader(train_dataset, batch_size=BATCH, shuffle=True, num_workers=NUM_WORKERS)
+        train_loader = DataLoader(train_dataset, batch_size=BATCH, shuffle=True, num_workers=NUM_WORKERS)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH, shuffle=False, num_workers=NUM_WORKERS)
 
     if is_main_process(rank):
         print("CREATING MODEL...")
@@ -414,6 +431,9 @@ def main():
         _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         logger = TrainingLogger(output_dir="training_logs", experiment_name=f"STANDARD_{_ts}")
         logger.start_training({
+            'dataset_size': total_samples,
+            'train_size': len(train_dataset),
+            'val_size': len(val_dataset),
             'batch_size': BATCH,
             'epochs': EPOCHS,
             'learning_rate': LR,
@@ -422,7 +442,6 @@ def main():
             'modes2': MODES2,
             'width': WIDTH,
             'n_layers': N_LAYERS,
-            'dataset_size': len(train_dataset),
         }, model=model.module if is_distributed else model)
     else:
         logger = None
@@ -453,12 +472,12 @@ def main():
     for epoch in range(start_epoch, target_end_epoch + 1):
         epoch_start = time.time()
         if is_distributed:
-            sampler.set_epoch(epoch)
+            train_sampler.set_epoch(epoch)
         
         model.train()
         running = 0.0
         
-        pbar = tqdm(loader, desc=f"Epoch {epoch}/{EPOCHS}", leave=False) if is_main_process(rank) else loader
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{EPOCHS}", leave=False) if is_main_process(rank) else train_loader
         
         # Accumulators for loss components
         running_mse = 0.0
@@ -504,8 +523,28 @@ def main():
             if is_main_process(rank) and hasattr(pbar, 'set_postfix'):
                 pbar.set_postfix({"loss": f"{loss.item():.4e}"})
         
+        # --- Validation Pass ---
+        model.eval()
+        val_running = 0.0
+        with torch.no_grad():
+            for batch in val_loader:
+                xb, yb = batch
+                xb = xb.to(device); yb = yb.to(device)
+                sdf = xb[:, 0:1, :, :]
+                mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+                pred = model(xb)
+                # Use same loss weights as training for consistency in validation loss
+                w = get_loss_weights(epoch)
+                v_loss = sensor_weighted_mse(pred, yb, sensor_mask=mb, 
+                                            grad_weight=w['grad_weight'], 
+                                            spectral_weight=w['spectral_weight'],
+                                            peak_weight=w['peak_weight'],
+                                            wake_weight=w['wake_weight'])
+                val_running += float(v_loss.item()) * xb.shape[0]
+        
         scheduler.step()
-        n_samples = len(train_dataset)
+        n_train = len(train_dataset)
+        n_val = len(val_dataset)
         
         # Aggregate loss across GPUs
         if is_distributed:
@@ -514,7 +553,7 @@ def main():
             dist.barrier()
             
             # Aggregate all loss components across GPUs
-            running_tensor = torch.tensor([running, running_mse, running_grad, running_spec, running_peak, running_wake], device=device)
+            running_tensor = torch.tensor([running, running_mse, running_grad, running_spec, running_peak, running_wake, val_running], device=device)
             dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
             running = running_tensor[0].item()
             running_mse = running_tensor[1].item()
@@ -522,17 +561,19 @@ def main():
             running_spec = running_tensor[3].item()
             running_peak = running_tensor[4].item()
             running_wake = running_tensor[5].item()
+            val_running = running_tensor[6].item()
         
-        avg_loss = running / n_samples
-        avg_mse = running_mse / n_samples
-        avg_grad = running_grad / n_samples
-        avg_spec = running_spec / n_samples
-        avg_peak = running_peak / n_samples
-        avg_wake = running_wake / n_samples
+        avg_loss = running / n_train
+        avg_mse = running_mse / n_train
+        avg_grad = running_grad / n_train
+        avg_spec = running_spec / n_train
+        avg_peak = running_peak / n_train
+        avg_wake = running_wake / n_train
+        avg_val_loss = val_running / n_val
         
         if is_main_process(rank):
             epoch_duration = time.time() - epoch_start
-            print(f"Epoch {epoch}/{target_end_epoch} loss {avg_loss:.6e} ({epoch_duration:.2f}s)")
+            print(f"Epoch {epoch}/{target_end_epoch} loss {avg_loss:.6e} val_loss {avg_val_loss:.6e} ({epoch_duration:.2f}s)")
             
             # Save resumable checkpoint every N epochs
             if epoch % CHECKPOINT_INTERVAL == 0:
@@ -553,11 +594,10 @@ def main():
             
             if is_main_process(rank):
                 train_losses.append(avg_loss)
-                # Validation loop omitted for brevity in some versions, but if current training is val-less:
-                val_losses.append(avg_loss) # Tracking training for now or val if exists
+                val_losses.append(avg_val_loss)
             
-            if avg_loss < best_loss:
-                best_loss = avg_loss
+            if avg_val_loss < best_loss:
+                best_loss = avg_val_loss
                 patience_counter = 0
                 
                 # Only Rank 0 saves the model
@@ -599,6 +639,7 @@ def main():
             if is_main_process(rank) and logger:
                 logger.log_epoch(epoch, {
                     'total_loss': avg_loss,
+                    'val_loss': avg_val_loss,
                     'mse_loss': avg_mse,
                     'gradient_loss': avg_grad,
                     'spectral_loss': avg_spec,
