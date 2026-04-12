@@ -261,6 +261,7 @@ def main():
     parser = argparse.ArgumentParser(description='FNO Training')
     parser.add_argument('--fresh', action='store_true', help='Start fresh training (ignore checkpoint)')
     parser.add_argument('--config', type=str, default='config.toml', help='Config file to use')
+    parser.add_argument('--val_dir', type=str, default=None, help='Directory containing validation X.npy and Y.npy')
     parser.add_argument('--reset-patience', action='store_true', help='Reset best_loss and patience (use when changing loss function)')
     args = parser.parse_args()
     
@@ -296,22 +297,29 @@ def main():
         print(f"  X path: {x_path}")
         print(f"  Y path: {y_path}")
     
-    train_dataset_full = NpyDataset(x_path, y_path, augment=True)
-    val_dataset_full = NpyDataset(x_path, y_path, augment=False)
-    
-    # Train/Val split (90/10)
-    total_samples = len(train_dataset_full)
-    train_size = int(0.9 * total_samples)
-    val_size = total_samples - train_size
-    
-    # Fixed seed for deterministic split across nodes
-    indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42)).tolist()
-    train_idx, val_idx = indices[:train_size], indices[train_size:]
-    
-    train_dataset = Subset(train_dataset_full, train_idx)
-    val_dataset = Subset(val_dataset_full, val_idx)
-    
-    in_ch = train_dataset_full.X.shape[1]  # Should be 8
+    if args.val_dir and os.path.exists(os.path.join(args.val_dir, 'X.npy')):
+        train_dataset = NpyDataset(x_path, y_path, augment=True)
+        val_dataset = NpyDataset(os.path.join(args.val_dir, 'X.npy'), os.path.join(args.val_dir, 'Y.npy'), augment=False)
+        total_samples = len(train_dataset) + len(val_dataset)
+        if is_main_process(rank): print(f"Using explicitly specified val_dir: {args.val_dir}", flush=True)
+    else:
+        train_dataset_full = NpyDataset(x_path, y_path, augment=True)
+        val_dataset_full = NpyDataset(x_path, y_path, augment=False)
+        
+        # Train/Val split (90/10)
+        total_samples = len(train_dataset_full)
+        train_size = int(0.9 * total_samples)
+        val_size = total_samples - train_size
+        
+        # Fixed seed for deterministic split across nodes
+        indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42)).tolist()
+        train_idx, val_idx = indices[:train_size], indices[train_size:]
+        
+        train_dataset = Subset(train_dataset_full, train_idx)
+        val_dataset = Subset(val_dataset_full, val_idx)
+        if is_main_process(rank): print(f"Using 90/10 random train/val split natively. Train: {len(train_dataset)}, Val: {len(val_dataset)}", flush=True)
+        
+    in_ch = train_dataset[0][0].shape[0]  # Should be 8
     
     if is_main_process(rank):
         print("=" * 50)
