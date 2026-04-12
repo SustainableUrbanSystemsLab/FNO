@@ -299,10 +299,14 @@ def main():
     train_dataset_full = NpyDataset(x_path, y_path, augment=True)
     val_dataset_full = NpyDataset(x_path, y_path, augment=False)
     
-    # Train/Val split (90/10)
+    # Train/Val split (configurable from config.toml)
+    VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
     total_samples = len(train_dataset_full)
-    train_size = int(0.9 * total_samples)
+    train_size = int((1.0 - VAL_SPLIT) * total_samples)
     val_size = total_samples - train_size
+    
+    if is_main_process(rank):
+        print(f"Applying {((1.0 - VAL_SPLIT)*100):.0f}/{VAL_SPLIT*100:.0f} train/val split (from config)")
     
     # Fixed seed for deterministic split across nodes
     indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42)).tolist()
