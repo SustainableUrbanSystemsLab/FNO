@@ -205,17 +205,59 @@ def main():
         logger.start_training({
             'batch_size': BATCH,
             'epochs': EPOCHS,
-            'learning_rate': LR,
-            'modes': (MODES1, MODES2),
-            'width': WIDTH,
-        }, model=model.module if is_distributed else model)
+            VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
+            train_size = int((1.0 - VAL_SPLIT) * len(full_dataset))
+            val_size = len(full_dataset) - train_size
+            indices = torch.randperm(len(full_dataset), generator=torch.Generator().manual_seed(42)).tolist()
+            from torch.utils.data import Subset
+            train_dataset = Subset(full_dataset, indices[:train_size])
+            val_dataset = Subset(val_dataset_full, indices[train_size:])
+            if is_main_process(rank): print(f'Using {((1.0 - VAL_SPLIT)*100):.0f}/{VAL_SPLIT*100:.0f} random train/val split natively. Train: {train_size}, Val: {val_size}', flush=True)
 
-best_loss = float('inf')
-train_losses = []
-val_losses = []
-for epoch in range(1, EPOCHS + 1):
+        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank) if is_distributed else None
+        val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False) if is_distributed else None
+        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=2 if not is_distributed else 1)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, shuffle=False, num_workers=2 if not is_distributed else 1)
+
+        # 4. Model & Optimization
+        sample_x, _ = train_dataset[0]
+        model = GeoFNO(in_channels=sample_x.shape[0],
+                        n_modes=(MODES1, MODES2),
+                        hidden_channels=WIDTH).to(device)
+
+        if os.path.exists(MODEL_OUT) and not args.fresh:
+            if is_main_process(rank): print(f"Resuming weights: {MODEL_OUT}", flush=True)
+            try:
+                saved = torch.load(MODEL_OUT, map_location=device, weights_only=False)
+                # Support both payload dict and raw state dict
+                sd = saved['model_state_dict'] if isinstance(saved, dict) and 'model_state_dict' in saved else saved
+                model.load_state_dict(sd, strict=True)
+                if is_main_process(rank): print("  Weights loaded successfully", flush=True)
+            except Exception as e:
+                if is_main_process(rank): print(f"  WARNING: Could not load weights: {e}", flush=True)
+
+        if is_distributed: model = DDP(model, device_ids=[local_rank])
+
+        opt = torch.optim.AdamW(model.parameters(), lr=LR)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
+
+        if is_main_process(rank):
+            _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            logger = TrainingLogger(output_dir="training_logs", experiment_name=f"GEO_{_ts}")
+            logger.start_training({
+                'batch_size': BATCH,
+                'epochs': EPOCHS,
+                'learning_rate': LR,
+                'modes': (MODES1, MODES2),
+                'width': WIDTH,
+            }, model=model.module if is_distributed else model)
+
+        best_loss = float('inf')
+        train_losses = []
+        val_losses = []
+        for epoch in range(1, EPOCHS + 1):
             epoch_start = time.time()
-            if is_distributed: sampler.set_epoch(epoch)
+            if is_distributed: train_sampler.set_epoch(epoch)
             model.train()
             running_loss = 0.0
             running_mse = 0.0
