@@ -8,8 +8,6 @@ def infer_grid_from_coords_simple(xs, ys, tol=1e-6):
     ky = np.round(ys / tol).astype(int)
     ux = np.unique(kx); uy = np.unique(ky)
     nx = len(ux); ny = len(uy)
-    # if nx * ny != len(xs):
-    #     return None
     ux_sorted = np.sort(ux); uy_sorted = np.sort(uy)
     key_to_ix = {k:i for i,k in enumerate(ux_sorted)}
     key_to_iy = {k:i for i,k in enumerate(uy_sorted)}
@@ -22,12 +20,12 @@ def build_input_tensor_from_gh(gh_outputs, H=None, W=None, include_U_ref_channel
     # Backward compatibility: map U_at_z -> U_over_Uref
     if 'U_at_z' in gh_outputs and 'U_over_Uref' not in gh_outputs:
         gh_outputs['U_over_Uref'] = gh_outputs['U_at_z']
-    
+
     required = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_coords','Y_coords','dir_sin','dir_cos']
     for k in required:
         if k not in gh_outputs:
             raise ValueError(f"Missing GH output '{k}'")
-    
+
     N = len(gh_outputs['SDF'])
     xs = np.array(gh_outputs['X_coords'], dtype=float)
     ys = np.array(gh_outputs['Y_coords'], dtype=float)
@@ -38,9 +36,8 @@ def build_input_tensor_from_gh(gh_outputs, H=None, W=None, include_U_ref_channel
     if infer is not None:
         nx, ny, xs_vals, ys_vals, idx_map = infer
     else:
-        if H is None or W is None: raise ValueError("Grid inference failed") 
+        if H is None or W is None: raise ValueError("Grid inference failed")
         nx, ny = W, H
-        # Simple row-major fallback
         idx_map = [(i//nx, i%nx) for i in range(N)]
 
     # 2. Centering Strategy
@@ -53,9 +50,18 @@ def build_input_tensor_from_gh(gh_outputs, H=None, W=None, include_U_ref_channel
         x_center, y_center = np.mean(xs), np.mean(ys)
 
     # 3. Channel Population
+    # Channel layout matches the on-the-fly remap in pipelines/train/distributed.py:
+    #   Ch0: SDF / 200
+    #   Ch1: Bldg_height / 50
+    #   Ch2: Z_relative / 10
+    #   Ch3: U_over_Uref * 2
+    #   Ch4: X_local / 500  (building-centered)
+    #   Ch5: Y_local / 500  (building-centered)
+    #   Ch6: dir_sin
+    #   Ch7: dir_cos
     ch_names = ['SDF','Bldg_height','Z_relative','U_over_Uref','X_local','Y_local','dir_sin','dir_cos']
     channels = [np.zeros((ny, nx), dtype=dtype) for _ in ch_names]
-    
+
     for pt_idx, (iy, ix) in enumerate(idx_map):
         channels[0][iy, ix] = float(gh_outputs['SDF'][pt_idx])
         channels[1][iy, ix] = hs[pt_idx]
@@ -63,22 +69,18 @@ def build_input_tensor_from_gh(gh_outputs, H=None, W=None, include_U_ref_channel
         channels[3][iy, ix] = float(gh_outputs['U_over_Uref'][pt_idx])
         channels[4][iy, ix] = xs[pt_idx] - x_center
         channels[5][iy, ix] = ys[pt_idx] - y_center
-        channels[6][iy, ix] = float(gh_outputs['dir_sin'][pt_idx]) 
+        channels[6][iy, ix] = float(gh_outputs['dir_sin'][pt_idx])
         channels[7][iy, ix] = float(gh_outputs['dir_cos'][pt_idx])
 
-    # 4. Standard Physical Normalization (Matching FNO Model Data Specification)
-    channels[0] /= 200.0   # SDF (0-200m -> 0.0-1.0)
-    channels[1] /= 50.0    # Bldg_height (0-50m -> 0.0-1.0)
-    channels[2] /= 10.0    # Z_relative (0-10m -> 0.0-1.0)
-    channels[3] *= 2.0     # U_over_Uref (Normalised range 0.2-2.0 as per spec)
-    channels[4] /= 500.0   # X_local (-500 to 500 -> -1.0 to 1.0)
-    channels[5] /= 500.0   # Y_local (-500 to 500 -> -1.0 to 1.0)
-    
-    # Wind direction components are already -1.0 to 1.0
-    channels[6] *= 1.0     # dir_sin
-    channels[7] *= 1.0     # dir_cos
+    # 4. Physical Normalization (matches distributed.py _remap_to_fno)
+    channels[0] /= 200.0   # SDF
+    channels[1] /= 50.0    # Bldg_height
+    channels[2] /= 10.0    # Z_relative
+    channels[3] *= 2.0     # U_over_Uref
+    channels[4] /= 500.0   # X_local
+    channels[5] /= 500.0   # Y_local
+    # ch6/ch7 already in [-1, 1]
 
-    # Handle U_ref if needed
     if include_U_ref_channel:
         if U_ref_scalar is None: raise ValueError("U_ref_scalar required")
         channels.append(np.full((ny, nx), float(U_ref_scalar), dtype=dtype))

@@ -43,7 +43,7 @@ def plot_domain_panel(ax, x_input):
     bldg_mask = x_input[1] > 0
     if np.any(bldg_mask):
         bldg_rgba = np.zeros((H, W, 4), dtype=np.float32)
-        bldg_rgba[bldg_mask] = [0.15, 0.15, 0.15, 1.0]
+        bldg_rgba[bldg_mask] = [0.0, 0.0, 0.0, 1.0]
         ax.imshow(bldg_rgba, origin="lower", extent=[0, W, 0, H], zorder=2)
         ys, xs = np.where(bldg_mask)
         gan_r = np.clip(np.sqrt(((xs - cx)**2 + (ys - cy)**2).max()) * 1.15, R * 0.35, R * 0.85)
@@ -88,8 +88,10 @@ def save_pred_vs_true(y_pred, y_true, out_path, x_input, has_gt=True):
     # Use Bldg_height (x_input[1]) for contours to show buildings, scaled back 
     bldg_area = x_input[1] > 0
     if np.any(bldg_area):
-        ax1.contour(bldg_area, levels=[0.5], colors="white", linewidths=0.5, origin="lower")
-        
+        bldg_rgba = np.zeros((H, W, 4), dtype=np.float32)
+        bldg_rgba[bldg_area] = [1.0, 1.0, 1.0, 1.0]
+        ax1.imshow(bldg_rgba, origin="lower", extent=[0, W, 0, H], zorder=10)
+
     ax1.set_xticks([]); ax1.set_yticks([])
     for sp in ax1.spines.values(): sp.set_visible(False)
 
@@ -97,7 +99,9 @@ def save_pred_vs_true(y_pred, y_true, out_path, x_input, has_gt=True):
     ax2.set_title("Prediction", pad=36, fontsize=15, fontweight="bold", bbox=dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
     ax2.imshow(y_pred_vis, cmap="viridis", vmin=0.0, vmax=2.0, origin="lower")
     if np.any(bldg_area):
-        ax2.contour(bldg_area, levels=[0.5], colors="white", linewidths=0.5, origin="lower")
+        bldg_rgba = np.zeros((H, W, 4), dtype=np.float32)
+        bldg_rgba[bldg_area] = [1.0, 1.0, 1.0, 1.0]
+        ax2.imshow(bldg_rgba, origin="lower", extent=[0, W, 0, H], zorder=10)
     ax2.set_xticks([]); ax2.set_yticks([])
     for sp in ax2.spines.values(): sp.set_visible(False)
 

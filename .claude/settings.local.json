@@ -6,7 +6,16 @@
       "Bash(set PYTHONIOENCODING=utf-8)",
       "Bash(python -c ':*)",
       "Bash(xargs grep:*)",
-      "Bash(grep -rn \"stack\\\\|\\\\.cat\\\\|channels\\\\|x_mean\\\\|normaliz\" pipelines/train/hybrid.py core/data/*.py)"
+      "Bash(grep -rn \"stack\\\\|\\\\.cat\\\\|channels\\\\|x_mean\\\\|normaliz\" pipelines/train/hybrid.py core/data/*.py)",
+      "Bash(python tools/infer_csv.py --csv val_csv --model models/hybrid_fno_weights.pth --model_type hybrid --output_dir results/val_inference_fixed)",
+      "Bash(python tools/infer_csv.py --csv val_csv/ --model models/hybrid_fno_weights.pth --model_type hybrid --output_dir results/val_inference_fixed)",
+      "Bash(python tools/infer_csv.py --csv \"C:/Users/ilker/Desktop/FNO/val_csv\" --model models/hybrid_fno_weights.pth --model_type hybrid --output_dir results/val_inference_fixed)",
+      "Bash(python -c \"import os; print\\(os.path.isdir\\('C:/Users/ilker/Desktop/FNO/val_csv'\\)\\); print\\(os.listdir\\('C:/Users/ilker/Desktop/FNO/val_csv'\\)\\)\")",
+      "Bash(python tools/infer_csv.py --csv \"C:/Users/ilker/Desktop/FNO/validation_csv\" --model models/hybrid_fno_weights.pth --model_type hybrid --output_dir results/val_inference_fixed)",
+      "Bash(python tools/infer_csv.py --csv \"C:/Users/ilker/Desktop/FNO/validation_csv_fixed\" --model models/hybrid_fno_weights.pth --model_type hybrid --output_dir results/val_inference_fixed)",
+      "Bash(python tools/infer_csv.py --csv \"C:/Users/ilker/Desktop/FNO/test_csv\" --model models/hybrid_fno_weights.pth --model_type hybrid --output_dir results/test_inference_fixed)",
+      "Bash(python tools/infer_csv.py --csv \"C:/Users/ilker/Desktop/FNO/validation_csv\" --model models/hybrid_fno_weights.pth --model_type hybrid --output_dir results/val_inference_fixed2)",
+      "Bash(python tools/infer_csv.py --csv \"C:/Users/ilker/Desktop/FNO/test_csv\" --model models/hybrid_fno_weights.pth --model_type hybrid --output_dir results/test_inference)"
     ]
   }
 }
