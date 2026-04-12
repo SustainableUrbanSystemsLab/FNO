@@ -233,9 +233,8 @@ def pinn_loss(pred, target, x_input, sensor_mask=None,
     wake = wake_physics_loss(pred, target, sdf_ch)
 
     # 6. Peak (extreme velocity) loss
-    flat_target = target.flatten()
-    hi_thresh = torch.quantile(flat_target, 0.90)
-    lo_thresh = torch.quantile(flat_target, 0.10)
+    hi_thresh = 0.5
+    lo_thresh = -0.5
     peak_mask = ((target >= hi_thresh) | (target <= lo_thresh)).float()
     peak = ((pred - target) ** 2 * peak_mask).sum() / (peak_mask.sum() + 1e-8)
 
