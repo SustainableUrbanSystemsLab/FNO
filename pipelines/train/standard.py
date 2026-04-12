@@ -103,21 +103,40 @@ def get_loss_weights(epoch):
 x_path = os.path.join(DATA_FOLDER, 'X.npy')
 y_path = os.path.join(DATA_FOLDER, 'Y.npy')
 
-if RANK == 0:
-    print(f"Loading dataset from {DATA_FOLDER}...")
-    print(f"  X path: {x_path}")
-    print(f"  Y path: {y_path}")
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--val_dir', type=str, default=None)
+    parser.add_argument('--fresh', action='store_true')
+    _args, _ = parser.parse_known_args()
 
-dataset = NpyDataset(x_path, y_path, augment=True)
+    if _args.val_dir and os.path.exists(os.path.join(_args.val_dir, 'X.npy')):
+        train_dataset = NpyDataset(x_path, y_path, augment=True)
+        val_dataset = NpyDataset(os.path.join(_args.val_dir, 'X.npy'), os.path.join(_args.val_dir, 'Y.npy'), augment=False)
+        if RANK == 0: print(f"Using explicitly specified val_dir: {_args.val_dir}", flush=True)
+    else:
+        full_dataset = NpyDataset(x_path, y_path, augment=True)
+        val_dataset_full = NpyDataset(x_path, y_path, augment=False)
+        VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
+        total_samples = len(full_dataset)
+        train_size = int((1.0 - VAL_SPLIT) * total_samples)
+        val_size = total_samples - train_size
+        indices = torch.randperm(total_samples, generator=torch.Generator().manual_seed(42)).tolist()
+        from torch.utils.data import Subset
+        train_dataset = Subset(full_dataset, indices[:train_size])
+        val_dataset = Subset(val_dataset_full, indices[train_size:])
+        if RANK == 0: print(f"Using {((1.0 - VAL_SPLIT)*100):.0f}/{VAL_SPLIT*100:.0f} random train/val split natively. Train: {train_size}, Val: {val_size}", flush=True)
 
-if IS_DISTRIBUTED:
-    sampler = DistributedSampler(dataset, num_replicas=WORLD_SIZE, rank=RANK, shuffle=True)
-    loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, num_workers=2, pin_memory=True)
-else:
-    sampler = None
-    loader = DataLoader(dataset, batch_size=BATCH, shuffle=True, num_workers=2)
+    if IS_DISTRIBUTED:
+        train_sampler = DistributedSampler(train_dataset, num_replicas=WORLD_SIZE, rank=RANK, shuffle=True)
+        val_sampler = DistributedSampler(val_dataset, num_replicas=WORLD_SIZE, rank=RANK, shuffle=False)
+        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, num_workers=2, pin_memory=True)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, num_workers=2, pin_memory=True)
+    else:
+        train_sampler = None
+        loader = DataLoader(train_dataset, batch_size=BATCH, shuffle=True, num_workers=2)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH, shuffle=False, num_workers=2)
 
-sample_x, _ = dataset[0]
+    sample_x, _ = train_dataset[0]
 in_ch = sample_x.shape[0]
 chs = ['SDF', 'Height', 'Z_rel', 'U_ref', 'X_loc', 'Y_loc', 'sin', 'cos']
 
@@ -260,14 +279,40 @@ for epoch in range(start_epoch, EPOCHS+1):
                 
         if RANK == 0:
             pbar.set_postfix({"loss": f"{loss.item():.4e}"})
+            
+    if IS_DISTRIBUTED:
+        dist.barrier()
+    
+    # --- EVALUATION PASS ---
+    model.eval()
+    val_running = 0.0
+    with torch.no_grad():
+        for batch in val_loader:
+            xb, yb = batch
+            xb, yb = xb.to(DEVICE).float(), yb.to(DEVICE).float()
+            sdf = xb[:, 0:1, :, :]
+            mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+            pred = model(xb)
+            w = get_loss_weights(epoch)
+            v_loss = sensor_weighted_mse(pred, yb, sensor_mask=mb,
+                                        grad_weight=w['grad_weight'], spectral_weight=w['spectral_weight'],
+                                        peak_weight=w['peak_weight'], wake_weight=w['wake_weight'], wake_threshold=-0.5)
+            val_running += float(v_loss.item()) * xb.shape[0]
+
+    if IS_DISTRIBUTED:
+        running_tensor = torch.tensor([running, val_running], device=DEVICE)
+        dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
+        running = running_tensor[0].item()
+        val_running = running_tensor[1].item()
         
     scheduler.step()
     epoch_time = time.time() - start_time
     
-    avg_loss = running/len(dataset)
+    avg_loss = running / len(train_dataset)
+    avg_val_loss = val_running / len(val_dataset)
     
     # Calculate average components
-    dataset_len = len(dataset)
+    dataset_len = len(train_dataset)
     avg_components = {k: v / dataset_len for k, v in running_comp.items()}
     
     # Prepare metrics for logger
@@ -298,8 +343,9 @@ for epoch in range(start_epoch, EPOCHS+1):
             save_feature_importance(model, chs, epoch_num=epoch)
             
     # Check for improvement (Early Stopping)
-    if avg_loss < best_loss:
-        best_loss = avg_loss
+    # Check for improvement (Early Stopping based on Validation)
+    if avg_val_loss < best_loss:
+        best_loss = avg_val_loss
         patience_counter = 0
         # Save BEST model to main file
         # Atomic save: save to temp and rename to prevent corruption
@@ -311,7 +357,7 @@ for epoch in range(start_epoch, EPOCHS+1):
             print(f"  > New best loss! Saved {MODEL_OUT}")
     else:
         patience_counter += 1
-        print(f"  > No improvement. Patience {patience_counter}/{PATIENCE}")
+        print(f"  > No improvement. Patience {patience_counter}/{PATIENCE} (Val Loss: {avg_val_loss:.6e})")
         if patience_counter >= PATIENCE:
             print(f"Early stopping triggered at epoch {epoch}")
             save_feature_importance(model, chs, epoch_num=epoch) # Save at early stop too
@@ -322,6 +368,7 @@ for epoch in range(start_epoch, EPOCHS+1):
     # Prepare metrics for logger (updated with new patience)
     metrics = {
         'total_loss': avg_loss,
+        'val_loss': avg_val_loss,
         'mse_loss': avg_components['mse_loss'],
         'gradient_loss': avg_components['gradient_loss'],
         'spectral_loss': avg_components['spectral_loss'],
@@ -335,7 +382,7 @@ for epoch in range(start_epoch, EPOCHS+1):
     
     if RANK == 0:
         logger.log_epoch(epoch, metrics)
-        print(f"Epoch {epoch}/{EPOCHS} loss {avg_loss:.6e} (Peak: {avg_components['peak_loss']:.6e})")
+        print(f"Epoch {epoch}/{EPOCHS} Train Loss {avg_loss:.6e} | Val Loss {avg_val_loss:.6e}")
 
     if 'early_stop' in locals() and early_stop:
         break

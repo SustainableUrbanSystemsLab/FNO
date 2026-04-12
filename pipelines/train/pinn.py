@@ -51,8 +51,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config.toml')
     parser.add_argument('--val_dir', type=str, default=None, help='Directory containing validation X.npy/Y.npy')
-    #, type=str, default='config.toml')
-    parser.add_argument('--val_dir', type=str, default=None, help='Directory containing validation X.npy/Y.npy')
     parser.add_argument('--fresh', action='store_true')
     args = parser.parse_args()
 
@@ -112,18 +110,29 @@ def main():
         x_path = os.path.join(DATA_FOLDER, 'X.npy')
         y_path = os.path.join(DATA_FOLDER, 'Y.npy')
         
-        if is_main(rank):
-            print(f"Loading dataset from {DATA_FOLDER}...")
-            print(f"  X path: {x_path}")
-            print(f"  Y path: {y_path}")
-            
-        dataset = NpyDataset(x_path, y_path, augment=True)
-        
-        sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank) if is_distributed else None
-        loader = DataLoader(dataset, batch_size=BATCH, sampler=sampler, shuffle=(sampler is None), num_workers=2)
+        if args.val_dir and os.path.exists(os.path.join(args.val_dir, 'X.npy')):
+            train_dataset = NpyDataset(x_path, y_path, augment=True)
+            val_dataset = NpyDataset(os.path.join(args.val_dir, 'X.npy'), os.path.join(args.val_dir, 'Y.npy'), augment=False)
+            if is_main(rank): print(f"Using explicitly specified val_dir: {args.val_dir}", flush=True)
+        else:
+            full_dataset = NpyDataset(x_path, y_path, augment=True)
+            val_dataset_full = NpyDataset(x_path, y_path, augment=False)
+            VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
+            train_size = int((1.0 - VAL_SPLIT) * len(full_dataset))
+            val_size = len(full_dataset) - train_size
+            indices = torch.randperm(len(full_dataset), generator=torch.Generator().manual_seed(42)).tolist()
+            from torch.utils.data import Subset
+            train_dataset = Subset(full_dataset, indices[:train_size])
+            val_dataset = Subset(val_dataset_full, indices[train_size:])
+            if is_main(rank): print(f"Using {((1.0 - VAL_SPLIT)*100):.0f}/{VAL_SPLIT*100:.0f} random train/val split natively. Train: {train_size}, Val: {val_size}", flush=True)
+
+        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank) if is_distributed else None
+        val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False) if is_distributed else None
+        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=2)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, shuffle=False, num_workers=2)
 
         # --- Model ---
-        sample_x, _ = dataset[0]
+        sample_x, _ = train_dataset[0]
         model = PINNFNO(
             in_channels=sample_x.shape[0],
             n_modes=(MODES1, MODES2),
@@ -197,48 +206,70 @@ def main():
                 for k in comp_accum:
                     comp_accum[k] += comps.get(k, 0.0) * bs
 
-            # Sync across GPUs
             if is_distributed:
                 torch.cuda.synchronize()
                 dist.barrier()
+            
+            # --- EVALUATION PASS ---
+            model.eval()
+            val_running = 0.0
+            with torch.no_grad():
+                for batch in val_loader:
+                    xb, yb = batch
+                    xb, yb = xb.to(device), yb.to(device)
+                    sdf = xb[:, 0:1, :, :]
+                    mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+                    pred = model(xb)
+                    v_loss, _ = pinn_loss(
+                        pred, yb, x_input=xb, sensor_mask=mb,
+                        grad_weight=GRAD_W, continuity_weight=CONT_W,
+                        momentum_weight=MOM_W, wake_weight=WAKE_W, peak_weight=PEAK_W
+                    )
+                    val_running += float(v_loss.item()) * xb.shape[0]
+
+            if is_distributed:
                 keys = ['mse_loss','gradient_loss','continuity_loss','momentum_loss','wake_loss','peak_loss']
-                vals = [running] + [comp_accum[k] for k in keys]
+                vals = [running] + [comp_accum[k] for k in keys] + [val_running]
                 t = torch.tensor(vals, device=device)
                 dist.all_reduce(t, op=dist.ReduceOp.SUM)
                 running = t[0].item()
                 for i, k in enumerate(keys):
                     comp_accum[k] = t[i+1].item()
+                val_running = t[-1].item()
 
             scheduler.step()
-            n = len(dataset)
-            avg_loss = running / n
+            n_samples_train = len(train_dataset)
+            n_samples_val   = len(val_dataset)
+            avg_loss = running / n_samples_train
+            avg_val_loss = val_running / n_samples_val
 
             if is_main(rank):
                 dur = time.time() - epoch_start
                 # Calculate averages
-                avgs = {k: comp_accum[k] / n for k in comp_accum}
+                avgs = {k: comp_accum[k] / n_samples_train for k in comp_accum}
                 cont_avg = avgs['continuity_loss']
                 wake_avg = avgs['wake_loss']
                 
                 # Log to metrics CSV
                 logger.log_epoch(epoch, {
                     'total_loss': avg_loss,
+                    'val_loss': avg_val_loss,
                     'mse_loss': avgs['mse_loss'],
                     'gradient_loss': avgs['gradient_loss'],
                     'continuity_loss': cont_avg,
                     'momentum_loss': avgs['momentum_loss'],
                     'wake_loss': wake_avg,
                     'peak_loss': avgs['peak_loss'],
-                    'spectral_loss': 0.0, # PINN does not have spectral loss natively but for tabular alignment
+                    'spectral_loss': 0.0,
                     'learning_rate': scheduler.get_last_lr()[0],
                     'epoch_time_sec': dur,
                     'best_loss': best_loss
                 })
                 train_losses.append(avg_loss)
-                val_losses.append(avg_loss)
+                val_losses.append(avg_val_loss)
                 
                 print(
-                    f"Epoch {epoch:4d}/{EPOCHS} | Loss: {avg_loss:.4e} "
+                    f"Epoch {epoch:4d}/{EPOCHS} | Loss: {avg_loss:.4e} | Val Loss: {avg_val_loss:.4e} "
                     f"| Cont: {cont_avg:.4e} | Wake: {wake_avg:.4e} | ({dur:.1f}s)",
                     flush=True
                 )

@@ -55,8 +55,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config.toml')
     parser.add_argument('--val_dir', type=str, default=None, help='Directory containing validation X.npy/Y.npy')
-    #, type=str, default='config.toml')
-    parser.add_argument('--val_dir', type=str, default=None, help='Directory containing validation X.npy/Y.npy')
     parser.add_argument('--fresh', action='store_true')
     parser.add_argument('--reset-patience', action='store_true')
     args = parser.parse_args()
@@ -153,67 +151,64 @@ def main():
         x_path = os.path.join(DATA_FOLDER, 'X.npy')
         y_path = os.path.join(DATA_FOLDER, 'Y.npy')
         
-        if is_main_process(rank):
-            print(f"Loading dataset from {DATA_FOLDER}...")
-            print(f"  X path: {x_path}")
-            print(f"  Y path: {y_path}")
+            if is_main_process(rank):
+                print(f"Loading dataset from {DATA_FOLDER}...")
+                print(f"  X path: {x_path}")
+                print(f"  Y path: {y_path}")
+                
+            if args.val_dir and os.path.exists(os.path.join(args.val_dir, 'X.npy')):
+                train_dataset = NpyDataset(x_path, y_path, augment=True)
+                val_dataset = NpyDataset(os.path.join(args.val_dir, 'X.npy'), os.path.join(args.val_dir, 'Y.npy'), augment=False)
+                if is_main_process(rank): print(f'Using explicitly specified val_dir: {args.val_dir}', flush=True)
+            else:
+                full_dataset = NpyDataset(x_path, y_path, augment=True)
+                val_dataset_full = NpyDataset(x_path, y_path, augment=False)
+                VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
+                train_size = int((1.0 - VAL_SPLIT) * len(full_dataset))
+                val_size = len(full_dataset) - train_size
+                indices = torch.randperm(len(full_dataset), generator=torch.Generator().manual_seed(42)).tolist()
+                from torch.utils.data import Subset
+                train_dataset = Subset(full_dataset, indices[:train_size])
+                val_dataset = Subset(val_dataset_full, indices[train_size:])
+                if is_main_process(rank): print(f'Using {((1.0 - VAL_SPLIT)*100):.0f}/{VAL_SPLIT*100:.0f} random train/val split natively. Train: {train_size}, Val: {val_size}', flush=True)
             
-        if args.val_dir and os.path.exists(os.path.join(args.val_dir, 'X.npy')):
-            train_dataset = NpyDataset(x_path, y_path, augment=True)
-            val_dataset = NpyDataset(os.path.join(args.val_dir, 'X.npy'), os.path.join(args.val_dir, 'Y.npy'), augment=False)
-            if is_main_process(rank): print(f'Using explicitly specified val_dir: {args.val_dir}', flush=True)
-        else:
-            full_dataset = NpyDataset(x_path, y_path, augment=True)
-            val_dataset_full = NpyDataset(x_path, y_path, augment=False)
-            VAL_SPLIT = config.get('training', {}).get('val_split', 0.1)
-            train_size = int((1.0 - VAL_SPLIT) * len(full_dataset))
-            val_size = len(full_dataset) - train_size
-            indices = torch.randperm(len(full_dataset), generator=torch.Generator().manual_seed(42)).tolist()
-            from torch.utils.data import Subset
-            train_dataset = Subset(full_dataset, indices[:train_size])
-            val_dataset = Subset(val_dataset_full, indices[train_size:])
-            if is_main_process(rank): print(f'Using random train/val split natively. Train: {len(train_dataset)}, Val: {len(val_dataset)}', flush=True)
-        
-        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank) if is_distributed else None
-        val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False) if is_distributed else None
-        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=2 if not is_distributed else 1)
-        val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, shuffle=False, num_workers=2 if not is_distributed else 1)
+            train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank) if is_distributed else None
+            val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False) if is_distributed else None
+            loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=2 if not is_distributed else 1)
+            val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, shuffle=False, num_workers=2 if not is_distributed else 1)
 
-        # 4. Model & Optimization
-        sample_x, _ = train_dataset[0]
-        model = GeoFNO(in_channels=sample_x.shape[0], 
-                          n_modes=(MODES1, MODES2),
-                          hidden_channels=WIDTH).to(device)
-        
-        if os.path.exists(MODEL_OUT) and not args.fresh:
-            if is_main_process(rank): print(f"Resuming weights: {MODEL_OUT}", flush=True)
-            try:
-                saved = torch.load(MODEL_OUT, map_location=device, weights_only=False)
-                result = model.load_state_dict(saved, strict=True)
-                if is_main_process(rank): print("  Weights loaded successfully (strict=True)", flush=True)
-            except RuntimeError as e:
-                if is_main_process(rank):
-                    print(f"  WARNING: Weight mismatch detected — starting FRESH (use --fresh to suppress this).", flush=True)
-                    print(f"  Reason: {e}", file=sys.stderr, flush=True)
-                # Architecture changed: don't load incompatible weights at all
+            # 4. Model & Optimization
+            sample_x, _ = train_dataset[0]
+            model = GeoFNO(in_channels=sample_x.shape[0], 
+                            n_modes=(MODES1, MODES2),
+                            hidden_channels=WIDTH).to(device)
+            
+            if os.path.exists(MODEL_OUT) and not args.fresh:
+                if is_main_process(rank): print(f"Resuming weights: {MODEL_OUT}", flush=True)
+                try:
+                    saved = torch.load(MODEL_OUT, map_location=device, weights_only=False)
+                    # Support both payload dict and raw state dict
+                    sd = saved['model_state_dict'] if isinstance(saved, dict) and 'model_state_dict' in saved else saved
+                    model.load_state_dict(sd, strict=True)
+                    if is_main_process(rank): print("  Weights loaded successfully", flush=True)
+                except Exception as e:
+                    if is_main_process(rank): print(f"  WARNING: Could not load weights: {e}", flush=True)
 
-        if is_distributed: model = DDP(model, device_ids=[local_rank])
-        
-        opt = torch.optim.AdamW(model.parameters(), lr=LR)
-        # Add scheduler for consistency with standard training
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
-        
-        l2_loss = LpLoss(d=2, p=2); h1_loss = H1Loss(d=2)
-        if is_main_process(rank): 
-            _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            logger = TrainingLogger(output_dir="training_logs", experiment_name=f"GEO_{_ts}")
-            logger.start_training({
-                'batch_size': BATCH,
-                'epochs': EPOCHS,
-                'learning_rate': LR,
-                'modes': (MODES1, MODES2),
-                'width': WIDTH,
-            }, model=model.module if is_distributed else model)
+            if is_distributed: model = DDP(model, device_ids=[local_rank])
+            
+            opt = torch.optim.AdamW(model.parameters(), lr=LR)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
+            
+            if is_main_process(rank): 
+                _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                logger = TrainingLogger(output_dir="training_logs", experiment_name=f"GEO_{_ts}")
+                logger.start_training({
+                    'batch_size': BATCH,
+                    'epochs': EPOCHS,
+                    'learning_rate': LR,
+                    'modes': (MODES1, MODES2),
+                    'width': WIDTH,
+                }, model=model.module if is_distributed else model)
         
         best_loss = float('inf')
         train_losses = []
@@ -262,7 +257,27 @@ def main():
             if is_distributed:
                 torch.cuda.synchronize()
                 dist.barrier()
-                running_tensor = torch.tensor([running_loss, running_mse, running_grad, running_spec, running_peak, running_wake], device=device)
+            
+            # --- EVALUATION PASS ---
+            model.eval()
+            val_running = 0.0
+            with torch.no_grad():
+                for batch in val_loader:
+                    xb, yb = batch
+                    xb, yb = xb.to(device), yb.to(device)
+                    sdf = xb[:, 0:1, :, :]
+                    mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+                    pred = model(xb)
+                    w = get_loss_weights(epoch)
+                    v_loss = sensor_weighted_mse(
+                        pred, yb, sensor_mask=mb,
+                        grad_weight=w['grad_weight'], spectral_weight=w['spectral_weight'],
+                        peak_weight=w['peak_weight'], wake_weight=w['wake_weight'], wake_threshold=-0.5
+                    )
+                    val_running += float(v_loss.item()) * xb.shape[0]
+
+            if is_distributed:
+                running_tensor = torch.tensor([running_loss, running_mse, running_grad, running_spec, running_peak, running_wake, val_running], device=device)
                 dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
                 running_loss = running_tensor[0].item()
                 running_mse  = running_tensor[1].item()
@@ -270,22 +285,26 @@ def main():
                 running_spec = running_tensor[3].item()
                 running_peak = running_tensor[4].item()
                 running_wake = running_tensor[5].item()
+                val_running  = running_tensor[6].item()
             
             scheduler.step()
-            n_samples = len(dataset)
-            avg_loss = running_loss / n_samples
-            avg_mse  = running_mse  / n_samples
-            avg_grad = running_grad / n_samples
-            avg_spec = running_spec / n_samples
-            avg_peak = running_peak / n_samples
-            avg_wake = running_wake / n_samples
+            n_train = len(train_dataset)
+            n_val = len(val_dataset)
+            avg_loss = running_loss / n_train
+            avg_val_loss = val_running / n_val
+            avg_mse  = running_mse  / n_train
+            avg_grad = running_grad / n_train
+            avg_spec = running_spec / n_train
+            avg_peak = running_peak / n_train
+            avg_wake = running_wake / n_train
             epoch_duration = time.time() - epoch_start
             if is_main_process(rank):
-                print(f"Epoch {epoch}/{EPOCHS} Loss: {avg_loss:.6e}", flush=True)
+                print(f"Epoch {epoch}/{EPOCHS} Train Loss: {avg_loss:.6e} | Val Loss: {avg_val_loss:.6e}", flush=True)
                 
                 # Log epoch metrics for plotting
                 logger.log_epoch(epoch, {
                     'total_loss':    avg_loss,
+                    'val_loss':      avg_val_loss,
                     'mse_loss':      avg_mse,
                     'gradient_loss': avg_grad,
                     'spectral_loss': avg_spec,
