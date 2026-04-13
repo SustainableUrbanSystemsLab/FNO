@@ -22,14 +22,14 @@ learning_rate = 1e-4
 patience = 50
 checkpoint_interval = 10
 val_split = 0.1       # Fraction of data held out for validation (fixed seed=42)
+dropout = 0.1         # Increased to prevent overfitting
 
 [model]
-# Sufficient modes to capture narrow building wakes
 modes1 = 48
 modes2 = 48
-width = 128
+width = 64
 n_layers = 4
-dropout = 0.02
+dropout = 0.1 # Sync with training section if script uses this one
 
 [loss]
 # Balanced with MSE to allow features to emerge
