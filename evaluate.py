@@ -75,12 +75,24 @@ def get_metrics_for_sample(y_pred, y_true, mask=None, device='cpu'):
     ss_tot = np.sum((y_true_masked - np.mean(y_true_masked)) ** 2)
     r2 = float(1.0 - ss_res / ss_tot) if ss_tot > 1e-12 else 0.0
 
-    # SSIM
+    # SSIM (Structural Similarity Index) - Requires 2D spatial context
     try:
         from skimage.metrics import structural_similarity
-        data_range = max(y_true.max(), y_pred.max()) - min(y_true.min(), y_pred.min())
-        ssim_val = float(structural_similarity(y_true, y_pred, data_range=data_range))
-    except ImportError:
+        # Ensure 2D
+        if len(y_true.shape) == 1:
+            side = int(np.sqrt(y_true.size))
+            y_t_2d = y_true.reshape(side, side)
+            y_p_2d = y_pred.reshape(side, side)
+        else:
+            y_t_2d, y_p_2d = y_true, y_pred
+            
+        dr = float(max(y_t_2d.max(), y_p_2d.max()) - min(y_t_2d.min(), y_p_2d.min()))
+        if dr > 0:
+            ssim_val = float(structural_similarity(y_t_2d, y_p_2d, data_range=dr))
+        else:
+            ssim_val = 1.0
+    except Exception as e:
+        # Fallback if skimage missing or shape error
         ssim_val = 0.0
 
     # Gradient Correlation
