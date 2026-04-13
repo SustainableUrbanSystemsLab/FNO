@@ -73,9 +73,17 @@ def main():
         y_pred = pred[0, 0].cpu().numpy()
         y_true = yb[0].cpu().numpy()
         
-        # Binary mask for the actual fluid domain (SDF > 0)
-        sdf = xb[0, 0].cpu().numpy()
-        mask = sdf > 0
+        # Robust mask detection: air is where there is no building at this Z-level
+        # Channel 1 is Bldg_height, Channel 2 is Z_relative
+        bldg_h = xb[0, 1].cpu().numpy()
+        z_rel = xb[0, 2].cpu().numpy()
+        # Fluid is where building height is less than sampling height (plus epsilon)
+        mask = bldg_h < (z_rel + 0.01)
+        
+        # If the above fails (e.g. if heights are zero), fall back to checking if SDF is non-zero
+        if np.sum(mask) == 0:
+            sdf = xb[0, 0].cpu().numpy()
+            mask = np.abs(sdf) > 1e-5
         
         metrics = get_metrics_for_sample(y_pred, y_true, mask, device=device.type)
         metrics['sample_idx'] = val_idx[i]
