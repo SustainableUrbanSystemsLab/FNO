@@ -33,7 +33,15 @@ from data.wind_dataset import WindDataset
 
 def get_metrics_for_sample(y_pred, y_true, mask=None, device='cpu'):
     """Compute comprehensive metrics for a single prediction vs ground truth."""
-    if mask is None or np.sum(mask) == 0:
+    # Ensure y_pred and y_true are at least 2D
+    if len(y_pred.shape) == 1: y_pred = y_pred.reshape(1, -1)
+    if len(y_true.shape) == 1: y_true = y_true.reshape(1, -1)
+    
+    # If no mask is provided, create one where y_true is not a building (-1.0)
+    if mask is None:
+        mask = y_true > -0.9
+    
+    if np.sum(mask) == 0:
         return {
             'MAE': 0.0, 'RMSE': 0.0, 'MAPE': 0.0, 'R2': 0.0, 'SSIM': 0.0,
             'GradCorr': 0.0, 'WakeLoss': 0.0, 'PeakLoss': 0.0, 'SpectralLoss': 0.0, 'GradientLoss': 0.0
