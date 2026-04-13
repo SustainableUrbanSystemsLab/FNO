@@ -14,12 +14,15 @@ epochs = 200
 learning_rate = 1e-4
 patience = 50
 checkpoint_interval = 1
+dropout = 0.1
+val_split = 0.1
 
 [model]
 modes1 = 48
 modes2 = 48
-width = 128
+width = 64
 n_layers = 4
+dropout = 0.1
 
 [loss]
 gradient_weight   = 1.5
