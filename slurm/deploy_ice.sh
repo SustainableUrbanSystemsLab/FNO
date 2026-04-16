@@ -48,17 +48,13 @@ esac
 if [ -f "$CONFIG_FILE" ]; then
     # Look for [ice] section
     # This logic extracts the [ice] section whether it's in the middle or at the end of the file
-    ICE_SECTION=$(sed -n '/^\[ice\]/,/^\s*\[/p' "$CONFIG_FILE")
-    if [ -z "$ICE_SECTION" ]; then
-        ICE_SECTION=$(sed -n '/^\[ice\]/,$p' "$CONFIG_FILE")
-    fi
-
-    ICE_ACCOUNT=$(echo "$ICE_SECTION" | grep -E "^\s*account\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' "' | tr -d "'")
-    ICE_PARTITION=$(echo "$ICE_SECTION" | grep -E "^\s*partition\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' "' | tr -d "'")
-    ICE_WALLTIME=$(echo "$ICE_SECTION" | grep -E "^\s*walltime\s*=" | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' "' | tr -d "'")
+    # Simplified extraction without complex sectioning
+    ICE_ACCOUNT=$(grep -E "^account\s*=" "$CONFIG_FILE" | head -n 1 | cut -d'"' -f2)
+    ICE_PARTITION=$(grep -E "^partition\s*=" "$CONFIG_FILE" | head -n 1 | cut -d'"' -f2)
+    ICE_WALLTIME=$(grep -E "^walltime\s*=" "$CONFIG_FILE" | head -n 1 | cut -d'"' -f2)
     
     if [ -n "$ICE_WALLTIME" ]; then
-        SOURCE="config.toml [ice]"
+        SOURCE="config file override"
     fi
 else
     echo "Warning: $CONFIG_FILE not found."
@@ -72,7 +68,7 @@ if [ -z "$ICE_ACCOUNT" ]; then
 fi
 
 if [ -z "$ICE_WALLTIME" ]; then
-    ICE_WALLTIME="00:10:00"
+    ICE_WALLTIME="12:00:00"  # 12 hour fallback for safety
 fi
 
 echo "=========================================="
