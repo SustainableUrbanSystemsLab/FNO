@@ -37,4 +37,4 @@ num_workers = 4
 [ice]
 account = "coc"
 partition = ""
-walltime = "12:00:00"
+walltime = "24:00:00"
