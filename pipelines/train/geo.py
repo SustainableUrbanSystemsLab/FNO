@@ -9,6 +9,7 @@ Features:
 - Automated Model Checkpointing
 """
 import os, sys, torch, numpy as np, pandas as pd, argparse, traceback, time
+from multiprocessing import cpu_count
 from datetime import datetime
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -87,6 +88,13 @@ def main():
         EPOCHS  = config.get('training', {}).get('epochs', 100)
         LR      = config.get('training', {}).get('learning_rate', 1e-4)
         MODEL_OUT = config.get('paths', {}).get('model_checkpoint', 'fno_weights.pth')
+        _nw = config.get('performance', {}).get('num_workers', 0)
+        if _nw > 0:
+            NUM_WORKERS = _nw
+        elif sys.platform == 'win32':
+            NUM_WORKERS = min(8, max(1, cpu_count() // 2))
+        else:
+            NUM_WORKERS = max(1, cpu_count() // 2)
         CHECKPOINT_INTERVAL = config.get('training', {}).get('checkpoint_interval', 10)
 
         # Physics Weights (ramp up)
@@ -127,8 +135,8 @@ def main():
 
         train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank) if is_distributed else None
         val_sampler   = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False) if is_distributed else None
-        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=2 if not is_distributed else 1)
-        val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, shuffle=False, num_workers=2 if not is_distributed else 1)
+        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=NUM_WORKERS)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, shuffle=False, num_workers=NUM_WORKERS)
 
         # 4. Model
         sample_x, _ = train_dataset[0]
