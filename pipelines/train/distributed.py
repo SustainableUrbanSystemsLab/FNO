@@ -167,7 +167,7 @@ class NpyDataset(Dataset):
 
         # Memory-map for low RAM usage
         self.X = np.load(X_path, mmap_mode='r')  # (N, 8, H, W)
-        self.Y = np.load(Y_path, mmap_mode='r')  # (N, 1, H, W)
+        self.Y = np.load(Y_path, mmap_mode='r')  # (N, C_y, H, W)
         self.augment = augment
 
         assert self.X.shape[0] == self.Y.shape[0], \
@@ -224,19 +224,26 @@ class NpyDataset(Dataset):
         out_x[6] = raw_x[_RAW_DIR_SIN]
         out_x[7] = raw_x[_RAW_DIR_COS]
 
-        # --- Target: mag_U -> delta_u ---
+        # --- Target: mag_U -> delta_u (Channel 0) ---
+        out_y = np.zeros_like(raw_y)  # Matches number of channels in target (1, 2, or 4)
+        
         mag_u = raw_y[0]         # (H, W)
         # u_ref is per-pixel; compute delta where u_ref > 0
         has_data = u_ref > 1e-6
-        out_y = np.zeros_like(raw_y)  # (1, H, W)
         out_y[0, has_data] = (mag_u[has_data] - u_ref[has_data]) / (u_ref[has_data] + 1e-6)
-        out_y = np.clip(out_y, -2.0, 10.0)
+        out_y[0] = np.clip(out_y[0], -2.0, 10.0)
+
+        # --- Other Channels (k, etc.) ---
+        # If there are extra channels (like TKE 'k'), we keep them as is (raw or pre-normalized)
+        if raw_y.shape[0] > 1:
+            for c in range(1, raw_y.shape[0]):
+                out_y[c] = raw_y[c]
 
         return out_x, out_y
 
     def __getitem__(self, idx):
         x = np.array(self.X[idx], copy=True, dtype=np.float32)  # (8, H, W)
-        y = np.array(self.Y[idx], copy=True, dtype=np.float32)  # (1, H, W)
+        y = np.array(self.Y[idx], copy=True, dtype=np.float32)  # (C_y, H, W)
 
         # Remap from Transformer format to FNO format if needed
         if self.needs_remap:
@@ -323,7 +330,10 @@ def main():
         train_dataset = Subset(train_dataset_full, train_idx)
         val_dataset = Subset(val_dataset_full, val_idx)
 
-    in_ch = train_dataset[0][0].shape[0]  # Should be 8
+    # sample indexing to get input/output channel counts
+    sample_x, sample_y = train_dataset[0]
+    in_ch = sample_x.shape[0]  # Should be 8
+    out_ch = sample_y.shape[0] # Dynamic (1, 2, or 4)
 
     if is_main_process(rank):
         print("=" * 50)
@@ -333,6 +343,7 @@ def main():
         print(f"  Train samples: {len(train_dataset)}")
         print(f"  Val samples:   {len(val_dataset)}")
         print(f"  Input channels: {in_ch}")
+        print(f"  Output channels: {out_ch}")
         print(f"  Remap active: {train_dataset_full.needs_remap}")
 
         # Sanity check: run one sample through __getitem__ to show POST-REMAP ranges
@@ -365,7 +376,7 @@ def main():
         print(f"  FNO2d: modes=({MODES1},{MODES2}), width={WIDTH}, layers={N_LAYERS}")
 
     # Create model
-    model = FNO2d(in_channels=in_ch, out_channels=1, modes1=MODES1, modes2=MODES2,
+    model = FNO2d(in_channels=in_ch, out_channels=out_ch, modes1=MODES1, modes2=MODES2,
                   width=WIDTH, n_layers=N_LAYERS).to(device)
 
     if is_distributed:

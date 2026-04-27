@@ -204,19 +204,27 @@ def build_model(model_type, state_dict, DEVICE):
         width = state_dict["fno.fno_blocks.convs.0.bias"].shape[0]
         if "fno.fno_blocks.convs.0.weight.tensor" in state_dict:
             modes = state_dict["fno.fno_blocks.convs.0.weight.tensor"].shape[2]
+
+    # Auto-detect out_channels
+    out_ch = 1
+    # Check common output layer names for different architectures
+    for key in ["out_proj.2.weight", "refinement.4.weight", "reconstruct.decode.2.weight"]:
+        if key in state_dict:
+            out_ch = state_dict[key].shape[0]
+            break
             
-    print(f"Building {model_type} architecture -> Modes: {modes}, Width: {width}")
+    print(f"Building {model_type} architecture -> Modes: {modes}, Width: {width}, OutChannels: {out_ch}")
     
     # Init Classes
     typ = model_type.lower()
     if typ == "standard":
-        model = FNO2d(in_channels=8, out_channels=1, modes1=modes, modes2=modes, width=width, n_layers=layers)
+        model = FNO2d(in_channels=8, out_channels=out_ch, modes1=modes, modes2=modes, width=width, n_layers=layers)
     elif typ == "hybrid":
-        model = HybridFNO(in_channels=8, n_modes=(modes, modes), hidden_channels=width, n_layers=layers)
+        model = HybridFNO(in_channels=8, out_channels=out_ch, n_modes=(modes, modes), hidden_channels=width, n_layers=layers)
     elif typ == "pinn":
-        model = PINNFNO(in_channels=8, n_modes=(modes, modes), hidden_channels=width, n_layers=layers)
+        model = PINNFNO(in_channels=8, out_channels=out_ch, n_modes=(modes, modes), hidden_channels=width, n_layers=layers)
     elif typ == "geo":
-        model = GeoFNO(in_channels=8, n_modes=(modes, modes), hidden_channels=width, n_layers=layers)
+        model = GeoFNO(in_channels=8, out_channels=out_ch, n_modes=(modes, modes), hidden_channels=width, n_layers=layers)
     else:
         raise ValueError("Invalid model type. Choose from: standard, hybrid, pinn, geo")
         

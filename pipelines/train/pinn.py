@@ -87,8 +87,9 @@ def main():
         v_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=v_samp, shuffle=False, num_workers=2)
 
         # 3. Model
-        sample_x, _ = train_dataset[0]
-        model = PINNFNO(in_channels=sample_x.shape[0], n_modes=(MODES1, MODES2), hidden_channels=WIDTH, n_layers=N_LAYERS).to(device)
+        sample_x, sample_y = train_dataset[0]
+        out_ch = sample_y.shape[0]
+        model = PINNFNO(in_channels=sample_x.shape[0], out_channels=out_ch, n_modes=(MODES1, MODES2), hidden_channels=WIDTH, n_layers=N_LAYERS).to(device)
         
         if os.path.exists(MODEL_OUT) and not args.fresh:
             sd = torch.load(MODEL_OUT, map_location=device, weights_only=False)

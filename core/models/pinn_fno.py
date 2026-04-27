@@ -119,6 +119,10 @@ def continuity_loss(u_field, dx=1.0, dy=1.0):
     Returns:
         scalar continuity residual loss
     """
+    # [CHANNEL SELECTIVE] Ensure we only process the first channel (mag_U)
+    if u_field.shape[1] > 1:
+        u_field = u_field[:, 0:1]
+
     # Central differences for gradient
     du_dx = (u_field[:, :, :, 2:] - u_field[:, :, :, :-2]) / (2 * dx)
     du_dy = (u_field[:, :, 2:, :] - u_field[:, :, :-2, :]) / (2 * dy)
@@ -140,6 +144,10 @@ def momentum_smoothness_loss(u_field):
     This is a soft viscid constraint: the momentum equation predicts
     that velocity gradients are smoothed by viscosity ν∇²u.
     """
+    # [CHANNEL SELECTIVE] Focus only on the primary wind speed channel
+    if u_field.shape[1] > 1:
+        u_field = u_field[:, 0:1]
+
     # Laplacian via finite differences
     u = u_field[:, :, 1:-1, 1:-1]          # Interior
     u_xp = u_field[:, :, 1:-1, 2:]          # x+1
@@ -167,6 +175,11 @@ def wake_physics_loss(pred, target, sdf, wake_threshold=-0.5, sdf_threshold=0.05
         wake_threshold: delta_u value below which we call it a "wake"
         sdf_threshold: sdf above this = outside building = wake region possible
     """
+    # [CHANNEL SELECTIVE] Focus only on primary wind speed channel
+    if pred.shape[1] > 1:
+        pred = pred[:, 0:1]
+        target = target[:, 0:1]
+
     # Wake mask from ground truth in the fluid domain
     exterior = (sdf > sdf_threshold).float()        # Outside buildings
     gt_wake  = (target < wake_threshold).float()    # Strong wind deficit

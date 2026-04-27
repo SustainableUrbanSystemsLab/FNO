@@ -131,8 +131,9 @@ def main():
         val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, shuffle=False, num_workers=2 if not is_distributed else 1)
 
         # 4. Model
-        sample_x, _ = train_dataset[0]
-        model = GeoFNO(in_channels=sample_x.shape[0], n_modes=(MODES1, MODES2), hidden_channels=WIDTH).to(device)
+        sample_x, sample_y = train_dataset[0]
+        out_ch = sample_y.shape[0]
+        model = GeoFNO(in_channels=sample_x.shape[0], out_channels=out_ch, n_modes=(MODES1, MODES2), hidden_channels=WIDTH).to(device)
 
         if os.path.exists(MODEL_OUT) and not args.fresh:
             if is_main(rank): print(f"Loading weights from {MODEL_OUT}")

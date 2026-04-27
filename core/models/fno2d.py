@@ -76,6 +76,13 @@ class FNO2d(nn.Module):
 
 def compute_wake_loss(y_pred, y_target, sensor_mask, wake_threshold=-0.3):
     """Compute additional loss for wake regions (low wind speed areas)."""
+    # [CHANNEL SELECTIVE] Focus only on primary wind speed channel
+    if y_pred.shape[1] > 1:
+        y_pred = y_pred[:, 0:1]
+        y_target = y_target[:, 0:1]
+        if sensor_mask is not None and sensor_mask.shape[1] > 1:
+            sensor_mask = sensor_mask[:, 0:1]
+
     wake_mask = (y_target < wake_threshold).float()
     wake_error = ((y_pred - y_target) ** 2) * wake_mask * sensor_mask
     return wake_error.sum() / (wake_mask.sum() + 1e-8)
@@ -85,6 +92,13 @@ def compute_peak_loss(y_pred, y_target, sensor_mask, high_threshold=0.5, low_thr
     Optimized peak loss: Focus on extremes (High and Low wind speeds).
     Uses fixed thresholds instead of torch.quantile for 10x speedup.
     """
+    # [CHANNEL SELECTIVE] Focus only on primary wind speed channel
+    if y_pred.shape[1] > 1:
+        y_pred = y_pred[:, 0:1]
+        y_target = y_target[:, 0:1]
+        if sensor_mask is not None and sensor_mask.shape[1] > 1:
+            sensor_mask = sensor_mask[:, 0:1]
+
     high_mask = (y_target >= high_threshold).float()
     low_mask = (y_target <= low_threshold).float()
     extreme_mask = torch.maximum(high_mask, low_mask)
