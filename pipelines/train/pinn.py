@@ -7,6 +7,7 @@ Features:
 - DDP Scaling
 """
 import os, sys, torch, numpy as np, argparse, traceback, time
+from multiprocessing import cpu_count
 from datetime import datetime
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -56,6 +57,13 @@ def main():
         WIDTH, N_LAYERS = MC.get('width', 32), MC.get('n_layers', 4)
         BATCH, EPOCHS, LR = TC.get('batch_size', 16), TC.get('epochs', 100), TC.get('learning_rate', 1e-4)
         MODEL_OUT = config.get('paths', {}).get('model_checkpoint', 'pinn_weights.pth')
+        _nw = config.get('performance', {}).get('num_workers', 0)
+        if _nw > 0:
+            NUM_WORKERS = _nw
+        elif sys.platform == 'win32':
+            NUM_WORKERS = min(8, max(1, cpu_count() // 2))
+        else:
+            NUM_WORKERS = max(1, cpu_count() // 2)
         
         GRAD_W = LC.get('gradient_weight', 1.0)
         CONT_W = LC.get('continuity_weight', 0.1)
@@ -83,8 +91,8 @@ def main():
 
         t_samp = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank) if is_distributed else None
         v_samp = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False) if is_distributed else None
-        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=t_samp, shuffle=(t_samp is None), num_workers=2)
-        v_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=v_samp, shuffle=False, num_workers=2)
+        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=t_samp, shuffle=(t_samp is None), num_workers=NUM_WORKERS)
+        v_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=v_samp, shuffle=False, num_workers=NUM_WORKERS)
 
         # 3. Model
         sample_x, sample_y = train_dataset[0]
