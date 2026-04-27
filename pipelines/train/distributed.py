@@ -136,9 +136,16 @@ def is_main_process(rank):
 #   FNO[5]: Y_local / 500      (-1 to 1, building-centered)
 #   FNO[6]: dir_sin            (-1 to 1)
 #   FNO[7]: dir_cos            (-1 to 1)
-#   Y:      delta_u = (mag_U - U_ref) / U_ref, clipped [-2, 10]
+#   Y ch0:  delta_u       = (mag_U      - U_ref) / U_ref, clipped [-2, 10]
+#   Y ch1:  k             (raw, non-negative)
+#   Y ch2:  delta_u_roof  = (mag_U_roof - U_ref) / U_ref, clipped [-2, 10]
+#   Y ch3:  k_roof        (raw, non-negative)
 #
 # This dataset remaps on-the-fly.
+
+# Output channel metadata (matching Conditional Transformer repo)
+CHANNEL_NAMES  = ["U", "k", "U_roof", "k_roof"]
+CHANNEL_VMAXES = [2.0, 0.5, 2.0, 0.5]
 
 # Transformer -> FNO channel index mapping
 _RAW_X_COORDS  = 0
@@ -224,20 +231,28 @@ class NpyDataset(Dataset):
         out_x[6] = raw_x[_RAW_DIR_SIN]
         out_x[7] = raw_x[_RAW_DIR_COS]
 
-        # --- Target: mag_U -> delta_u (Channel 0) ---
-        out_y = np.zeros_like(raw_y)  # Matches number of channels in target (1, 2, or 4)
-        
-        mag_u = raw_y[0]         # (H, W)
-        # u_ref is per-pixel; compute delta where u_ref > 0
+        # --- Target remapping (4-channel: mag_U, k, mag_U_roof, k_roof) ---
+        out_y = np.zeros_like(raw_y)  # (C_y, H, W)
         has_data = u_ref > 1e-6
+
+        # Ch0: mag_U -> delta_u = (mag_U - U_ref) / U_ref
+        mag_u = raw_y[0]
         out_y[0, has_data] = (mag_u[has_data] - u_ref[has_data]) / (u_ref[has_data] + 1e-6)
         out_y[0] = np.clip(out_y[0], -2.0, 10.0)
 
-        # --- Other Channels (k, etc.) ---
-        # If there are extra channels (like TKE 'k'), we keep them as is (raw or pre-normalized)
+        # Ch1: k (TKE) — keep raw, ensure non-negative
         if raw_y.shape[0] > 1:
-            for c in range(1, raw_y.shape[0]):
-                out_y[c] = raw_y[c]
+            out_y[1] = np.maximum(raw_y[1], 0.0)
+
+        # Ch2: mag_U_roof -> delta_u_roof (same transform as ch0)
+        if raw_y.shape[0] > 2:
+            mag_u_roof = raw_y[2]
+            out_y[2, has_data] = (mag_u_roof[has_data] - u_ref[has_data]) / (u_ref[has_data] + 1e-6)
+            out_y[2] = np.clip(out_y[2], -2.0, 10.0)
+
+        # Ch3: k_roof (TKE roof) — keep raw, ensure non-negative
+        if raw_y.shape[0] > 3:
+            out_y[3] = np.maximum(raw_y[3], 0.0)
 
         return out_x, out_y
 

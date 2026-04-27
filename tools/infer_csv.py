@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
 """
-FNO CSV Inference Script
-=========================
+FNO CSV Inference Script — 4-Channel Output (U, k, U_roof, k_roof)
+=====================================================================
 Loads a trained FNO model (Standard, Hybrid, PINN, Geo), reads CSV input(s),
-runs inference, and saves the prediction back out as a Grasshopper-compatible
-CSV file + a visual PNG plot exactly matching the Conditional Transformer format.
+runs inference, and saves:
+  1. Grasshopper-compatible prediction CSV
+  2. Per-channel 4-panel PNG visualizations (Domain | GT | Pred | Diff+Metrics)
+     matching the Conditional Transformer visualization format.
+
+Masking rules (identical to pix2pix_hd_uk_roof.py):
+  - ch0,1 (U, k):          mask *building interiors*  — no flow inside solid obstacles
+  - ch2,3 (U_roof, k_roof): mask *open ground*        — roof data only exists on buildings
 
 Usage:
-  python tools/infer_csv.py --csv test_csv/ML_FormFlux_1_135.csv --model geo_fno_weights.pth --model_type geo
+  python tools/infer_csv.py --csv test_csv/ML_FormFlux_1_135.csv \\
+      --model geo_fno_weights.pth --model_type geo
 """
-import os, sys, torch, numpy as np, pandas as pd, matplotlib.pyplot as plt, glob, argparse
+import os, sys, torch, numpy as np, pandas as pd, glob, argparse
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
@@ -18,12 +28,18 @@ from core.models.hybrid import HybridFNO
 from core.models.pinn_fno import PINNFNO
 from core.models.geo_fno import GeoFNO
 from core.utils.gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
+from pipelines.train.distributed import CHANNEL_NAMES, CHANNEL_VMAXES
+
+
+# ================================================================
+# Domain Setup Panel (unchanged from original)
+# ================================================================
 
 def plot_domain_panel(ax, x_input):
     H, W = x_input.shape[1], x_input.shape[2]
     cx, cy = W // 2, H // 2
     R = min(H, W) // 2 - 5
-    
+
     sin_val, cos_val = float(x_input[6].mean()), float(x_input[7].mean())
     mag = np.sqrt(sin_val**2 + cos_val**2)
     if mag < 1e-6: sin_val, cos_val = 1.0, 0.0
@@ -43,12 +59,12 @@ def plot_domain_panel(ax, x_input):
     bldg_mask = x_input[1] > 0
     if np.any(bldg_mask):
         bldg_rgba = np.zeros((H, W, 4), dtype=np.float32)
-        bldg_rgba[bldg_mask] = [0.0, 0.0, 0.0, 1.0]
+        bldg_rgba[bldg_mask] = [0.15, 0.15, 0.15, 1.0]
         ax.imshow(bldg_rgba, origin="lower", extent=[0, W, 0, H], zorder=2)
         ys, xs = np.where(bldg_mask)
         gan_r = np.clip(np.sqrt(((xs - cx)**2 + (ys - cy)**2).max()) * 1.15, R * 0.35, R * 0.85)
     else: gan_r = R * 0.6
-        
+
     ax.add_patch(plt.Circle((cx, cy), gan_r, fill=False, edgecolor="goldenrod", linestyle="--", linewidth=1.5, zorder=3))
     ax.add_patch(mpatches.Arc((cx, cy), R * 2, R * 2, angle=0, theta1=inlet_center_deg-90, theta2=inlet_center_deg+90, edgecolor="royalblue", linewidth=2.5, fill=False, zorder=4))
     ax.add_patch(mpatches.Arc((cx, cy), R * 2, R * 2, angle=0, theta1=wind_dir_deg-90, theta2=wind_dir_deg+90, edgecolor="red", linewidth=2.5, fill=False, zorder=4))
@@ -63,73 +79,119 @@ def plot_domain_panel(ax, x_input):
 
     ax.text(cx + (R+22)*np.cos(np.radians(inlet_center_deg+45)), cy + (R+22)*np.sin(np.radians(inlet_center_deg+45)), "inlet", color="royalblue", fontweight="bold", bbox=dict(boxstyle="round", facecolor="white", edgecolor="none", alpha=0.8))
     ax.text(cx + (R+22)*np.cos(np.radians(wind_dir_deg+45)), cy + (R+22)*np.sin(np.radians(wind_dir_deg+45)), "outlet", color="red", fontweight="bold", bbox=dict(boxstyle="round", facecolor="white", edgecolor="none", alpha=0.8))
-    
+
     ax.set_title("Domain Setup", pad=36, fontsize=15, fontweight="bold", bbox=dict(boxstyle="round,pad=0.3", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
     ax.set_xticks([]); ax.set_yticks([])
     for sp in ax.spines.values(): sp.set_visible(False)
 
-def save_pred_vs_true(y_pred, y_true, out_path, x_input, has_gt=True):
-    H, W = y_pred.shape
+
+# ================================================================
+# Per-Channel Visualization (matching Conditional Transformer)
+# ================================================================
+
+def save_pred_vs_true(y_pred, y_true, out_path, x_input=None,
+                      has_gt=True, vmax=2.0, channel_label="",
+                      extra_mask=None):
+    """4-panel visualization per channel.
+
+    Parameters
+    ----------
+    y_pred, y_true : ndarray (H, W)
+    x_input : ndarray (8, H, W) — conditioning input for domain panel
+    extra_mask : bool ndarray (H, W) — True where pixels should be hidden (white).
+                 For pedestrian channels: building interior.
+                 For roof channels: open ground (no building).
+    """
+    y_pred = np.asarray(y_pred)
+    y_true = np.asarray(y_true)
+    y_pred = np.maximum(y_pred, 0)
+
+    H, W = y_true.shape
     cy_m, cx_m = H // 2, W // 2
+    rad_m = min(H, W) // 2 - 5
     Yc_m, Xc_m = np.ogrid[:H, :W]
-    outside = np.sqrt((Xc_m - cx_m)**2 + (Yc_m - cy_m)**2) >= (min(H, W)//2 - 5)
-    
-    y_true_vis = np.ma.masked_where(outside, y_true)
-    y_pred_vis = np.ma.masked_where(outside, np.maximum(y_pred, 0))
-    diff_vis = np.ma.masked_where(outside, y_pred - y_true)
+    outside = np.sqrt((Xc_m - cx_m)**2 + (Yc_m - cy_m)**2) >= rad_m
 
-    fig = plt.figure(figsize=(24, 8)) 
-    ax0 = plt.subplot(1, 4, 1); plot_domain_panel(ax0, x_input)
-    
-    ax1 = plt.subplot(1, 4, 2)
-    ax1.set_title("Ground Truth" if has_gt else "Ground Truth (N/A)", pad=36, fontsize=15, fontweight="bold", bbox=dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
-    im1 = ax1.imshow(y_true_vis, cmap="viridis", vmin=0.0, vmax=2.0, origin="lower")
-    
-    # Use Bldg_height (x_input[1]) for contours to show buildings, scaled back 
-    bldg_area = x_input[1] > 0
-    if np.any(bldg_area):
-        bldg_rgba = np.zeros((H, W, 4), dtype=np.float32)
-        bldg_rgba[bldg_area] = [1.0, 1.0, 1.0, 1.0]
-        ax1.imshow(bldg_rgba, origin="lower", extent=[0, W, 0, H], zorder=10)
+    # Combined mask: circular boundary + physical mask (building/open-ground)
+    hide = outside if extra_mask is None else (outside | extra_mask)
 
+    cmap_field = matplotlib.cm.get_cmap("viridis").copy()
+    cmap_field.set_bad("white")
+    cmap_rdbu = matplotlib.cm.get_cmap("RdBu").copy()
+    cmap_rdbu.set_bad("white")
+
+    y_true_vis = np.ma.masked_where(hide, y_true)
+    y_pred_vis = np.ma.masked_where(hide, np.maximum(y_pred, 0))
+
+    suffix = f" ({channel_label})" if channel_label else ""
+
+    if x_input is not None:
+        fig = plt.figure(figsize=(24, 6))
+        grid_size = (1, 4)
+        has_input = True
+    else:
+        fig = plt.figure(figsize=(15, 5))
+        grid_size = (1, 3)
+        has_input = False
+
+    plot_idx = 1
+
+    # --- Panel 1: Domain Setup ---
+    if has_input:
+        ax0 = plt.subplot(grid_size[0], grid_size[1], plot_idx); plot_idx += 1
+        plot_domain_panel(ax0, x_input)
+
+    # --- Panel 2: Ground Truth ---
+    ax1 = plt.subplot(grid_size[0], grid_size[1], plot_idx); plot_idx += 1
+    title_gt = f"Ground Truth{suffix}" if has_gt else f"Ground Truth (N/A){suffix}"
+    ax1.set_title(title_gt, pad=36, fontsize=15, fontweight="bold",
+                  bbox=dict(boxstyle="round,pad=0.3", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
+    im1 = ax1.imshow(y_true_vis, cmap=cmap_field, vmin=0.0, vmax=vmax, origin="lower")
+    ax1.add_patch(plt.Circle((cx_m, cy_m), rad_m, fill=False, edgecolor="black", linewidth=0.8, zorder=10))
     ax1.set_xticks([]); ax1.set_yticks([])
     for sp in ax1.spines.values(): sp.set_visible(False)
 
-    ax2 = plt.subplot(1, 4, 3)
-    ax2.set_title("Prediction", pad=36, fontsize=15, fontweight="bold", bbox=dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
-    ax2.imshow(y_pred_vis, cmap="viridis", vmin=0.0, vmax=2.0, origin="lower")
-    if np.any(bldg_area):
-        bldg_rgba = np.zeros((H, W, 4), dtype=np.float32)
-        bldg_rgba[bldg_area] = [1.0, 1.0, 1.0, 1.0]
-        ax2.imshow(bldg_rgba, origin="lower", extent=[0, W, 0, H], zorder=10)
+    # --- Panel 3: Prediction ---
+    ax2 = plt.subplot(grid_size[0], grid_size[1], plot_idx); plot_idx += 1
+    ax2.set_title(f"Prediction{suffix}", pad=36, fontsize=15, fontweight="bold",
+                  bbox=dict(boxstyle="round,pad=0.3", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
+    ax2.imshow(y_pred_vis, cmap=cmap_field, vmin=0.0, vmax=vmax, origin="lower")
+    ax2.add_patch(plt.Circle((cx_m, cy_m), rad_m, fill=False, edgecolor="black", linewidth=0.8, zorder=10))
     ax2.set_xticks([]); ax2.set_yticks([])
     for sp in ax2.spines.values(): sp.set_visible(False)
 
-    ax3 = plt.subplot(1, 4, 4)
-    ax3.set_title("Diff (Pred - GT)" if has_gt else "Diff (N/A)", pad=36, fontsize=15, fontweight="bold", bbox=dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
-    im3 = ax3.imshow(diff_vis if has_gt else np.zeros_like(diff_vis), cmap="RdBu", vmin=-1.0, vmax=1.0, origin="lower")
-    ax3.set_xticks([]); ax3.set_yticks([])
-    for sp in ax3.spines.values(): sp.set_visible(False)
+    # --- Panel 4: Diff + Metrics ---
+    ax3 = plt.subplot(grid_size[0], grid_size[1], plot_idx)
+    diff = y_pred - y_true
+    diff_vis = np.ma.masked_where(hide, diff)
 
-    # Metrics
-    if has_gt:
-        dm = ~outside
-        diff_m, abs_m = diff_vis[dm], np.abs(diff_vis[dm])
-        mae = np.mean(abs_m)
-        rmse = np.sqrt(np.mean(diff_m**2))
-        valid_mape = np.abs(y_true[dm]) > 0.1
-        mape = np.mean(abs_m[valid_mape] / np.abs(y_true[dm][valid_mape])) * 100.0 if np.any(valid_mape) else 0.0
-        
-        gt_m = y_true[dm]
+    domain_mask = ~hide
+
+    if has_gt and np.any(domain_mask):
+        diff_m = diff[domain_mask]
+        abs_m  = np.abs(diff_m)
+        mae    = np.mean(abs_m)
+        rmse   = np.sqrt(np.mean(diff_m**2))
+
+        gt_m = y_true[domain_mask]
+        valid_mape = np.abs(gt_m) > 0.1
+        mape = np.mean(abs_m[valid_mape] / np.abs(gt_m[valid_mape])) * 100.0 if np.any(valid_mape) else 0.0
+
         ss_res = np.sum(diff_m ** 2)
         ss_tot = np.sum((gt_m - np.mean(gt_m)) ** 2)
         r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-12 else 0.0
 
         try:
-            from skimage.metrics import structural_similarity
-            ssim_val = structural_similarity(y_true, y_pred, data_range=max(y_true.max(), y_pred.max()) - min(y_true.min(), y_pred.min()))
+            from skimage.metrics import structural_similarity as ssim_func
+            pr_in = y_pred[domain_mask]
+            data_range = max(gt_m.max(), pr_in.max()) - min(gt_m.min(), pr_in.min())
+            if data_range < 1e-8:
+                ssim_val = 1.0
+            else:
+                _, ssim_map = ssim_func(y_true, y_pred, data_range=data_range, full=True)
+                ssim_val = float(ssim_map[domain_mask].mean())
             ssim_str = f"{ssim_val:.3f}"
-        except:
+        except Exception:
             ssim_str = "N/A"
 
         def _grad_corr(pred, true, mask):
@@ -142,42 +204,72 @@ def save_pred_vs_true(y_pred, y_true, out_path, x_input, has_gt=True):
             mm = np.concatenate([mask.flatten(), mask.flatten()])
             pg, tg = pg[mm], tg[mm]
             if np.std(pg) < 1e-8 or np.std(tg) < 1e-8: return 0.0
-            return np.corrcoef(pg, tg)[0, 1]
+            return float(np.corrcoef(pg, tg)[0, 1])
 
-        grad_corr = _grad_corr(y_pred, y_true, dm)
+        grad_corr = _grad_corr(y_pred, y_true, domain_mask)
         line1 = f"MAE:{mae:.3f} | RMSE:{rmse:.3f} | MAPE:{mape:.1f}%"
-        line2 = f"SSIM:{ssim_str} | GradCorr:{grad_corr:.3f} | R²:{r2:.3f}"
+        line2 = f"SSIM:{ssim_str} | GradCorr:{grad_corr:.3f} | R\u00b2:{r2:.3f}"
     else:
         line1 = "MAE:N/A | RMSE:N/A | MAPE:N/A"
-        line2 = "SSIM:N/A | GradCorr:N/A | R²:N/A"
-    
-    # --- COLORBARS AND METRICS ---
-    pos1 = ax1.get_position()
-    pos2 = ax2.get_position()
-    x_center_top = (pos1.x0 + pos2.x1) / 2.0
-    
-    cb_w = 0.16 
-    cb_h = 0.025
-    cb_y = pos1.y0 - 0.16 
-    
-    cax_shared = fig.add_axes([x_center_top - cb_w/2, cb_y, cb_w, cb_h])
+        line2 = "SSIM:N/A | GradCorr:N/A | R\u00b2:N/A"
+
+    im3 = ax3.imshow(diff_vis if has_gt else np.ma.masked_where(hide, np.zeros_like(diff)),
+                     cmap=cmap_rdbu, vmin=-vmax, vmax=vmax, origin="lower")
+    ax3.add_patch(plt.Circle((cx_m, cy_m), rad_m, fill=False, edgecolor="black", linewidth=0.8, zorder=10))
+    ax3.set_title(f"Diff (Pred - GT){suffix}" if has_gt else f"Diff (N/A){suffix}",
+                  pad=36, fontsize=15, fontweight="bold",
+                  bbox=dict(boxstyle="round,pad=0.3", facecolor="whitesmoke", edgecolor="gray", alpha=0.9))
+    ax3.set_xticks([]); ax3.set_yticks([])
+    for sp in ax3.spines.values(): sp.set_visible(False)
+
+    # --- Colorbars & Metrics ---
+    plt.tight_layout(pad=1.5)
+    fig.canvas.draw()
+
+    # Align title heights
+    all_axes = [ax0, ax1, ax2, ax3] if has_input else [ax1, ax2, ax3]
+    fig_ys = []
+    for a in all_axes:
+        tx, ty = a.title.get_position()
+        fig_y = a.transAxes.transform((tx, ty))[1]
+        fig_ys.append(fig_y)
+    target_fig_y = max(fig_ys)
+    for a in all_axes:
+        tx, _ = a.title.get_position()
+        new_axes_y = a.transAxes.inverted().transform((0, target_fig_y))[1]
+        a.title.set_position((tx, new_axes_y))
+    fig.canvas.draw()
+
+    bb1 = ax1.get_position()
+    bb2 = ax2.get_position()
+    bb3 = ax3.get_position()
+    cb_w = bb3.width
+    cb_y = min(bb1.y0, bb3.y0) - 0.12
+
+    shared_center = (bb1.x0 + bb2.x1) / 2
+    cax_shared = fig.add_axes([shared_center - cb_w/2, cb_y, cb_w, 0.025])
     fig.colorbar(im1, cax=cax_shared, orientation="horizontal")
-    
-    pos3 = ax3.get_position()
-    x_center_diff = pos3.x0 + pos3.width / 2.0 + 0.065
-    
-    cax_diff = fig.add_axes([x_center_diff - cb_w/2, cb_y, cb_w, cb_h])
+
+    diff_center = bb3.x0 + bb3.width / 2
+    cax_diff = fig.add_axes([diff_center - cb_w/2, cb_y, cb_w, 0.025])
     fig.colorbar(im3, cax=cax_diff, orientation="horizontal")
 
-    metrics_y = cb_y - 0.12
-    fig.text(x_center_diff, metrics_y, f"{line1}\n{line2}", 
-             ha="center", va="top", fontsize=9, family="monospace", 
-             bbox=dict(boxstyle="round,pad=0.5", facecolor="white", edgecolor="gray", alpha=0.9))
+    metrics_y = cb_y - 0.10
+    fig.text(diff_center, metrics_y, f"{line1}\n{line2}",
+             ha="center", va="top", fontsize=10, family="monospace",
+             bbox=dict(boxstyle="round", facecolor="white", alpha=0.85))
 
-    plt.tight_layout(pad=1.5)
     plt.savefig(out_path, dpi=150, bbox_inches="tight", pad_inches=0.15)
-    plt.close()
+    plt.close("all")
+    print(f"  -> Saved: {out_path}")
+    if has_gt and np.any(domain_mask):
+        print(f"     [{channel_label}] MAE={mae:.4f} RMSE={rmse:.4f} MAPE={mape:.1f}% "
+              f"SSIM={ssim_str} GradCorr={grad_corr:.3f} R\u00b2={r2:.4f}")
 
+
+# ================================================================
+# Model Loading
+# ================================================================
 
 def load_weights(path, device):
     checkpoint = torch.load(path, map_location=device, weights_only=False)
@@ -192,14 +284,14 @@ def build_model(model_type, state_dict, DEVICE):
     modes = config.get("model", {}).get("modes1", 32)
     width = config.get("model", {}).get("width", 64)
     layers = config.get("model", {}).get("n_layers", 4)
-    
+
     # Auto-detect parameters from state_dict to match the exact checkpoint
     if "in_proj.weight" in state_dict:
         width = state_dict["in_proj.weight"].shape[0]
         if "fourier_layers.0.0.weights1" in state_dict:
             w_shape = state_dict["fourier_layers.0.0.weights1"].shape
             modes = w_shape[2]
-            
+
     elif "fno.fno_blocks.convs.0.bias" in state_dict:
         width = state_dict["fno.fno_blocks.convs.0.bias"].shape[0]
         if "fno.fno_blocks.convs.0.weight.tensor" in state_dict:
@@ -207,14 +299,13 @@ def build_model(model_type, state_dict, DEVICE):
 
     # Auto-detect out_channels
     out_ch = 1
-    # Check common output layer names for different architectures
     for key in ["out_proj.2.weight", "refinement.4.weight", "reconstruct.decode.2.weight"]:
         if key in state_dict:
             out_ch = state_dict[key].shape[0]
             break
-            
+
     print(f"Building {model_type} architecture -> Modes: {modes}, Width: {width}, OutChannels: {out_ch}")
-    
+
     # Init Classes
     typ = model_type.lower()
     if typ == "standard":
@@ -227,105 +318,162 @@ def build_model(model_type, state_dict, DEVICE):
         model = GeoFNO(in_channels=8, out_channels=out_ch, n_modes=(modes, modes), hidden_channels=width, n_layers=layers)
     else:
         raise ValueError("Invalid model type. Choose from: standard, hybrid, pinn, geo")
-        
+
     model.load_state_dict(state_dict, strict=False)
     model.to(DEVICE).eval()
     return model
 
+
+# ================================================================
+# CSV Inference — Multi-Channel
+# ================================================================
+
+def _safe_col(df, candidates, default=None):
+    """Return the first matching column name from candidates, else default."""
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return default
+
+
+def _clean_flat(arr):
+    """NaN/Inf -> 0 for ground-truth arrays."""
+    arr = arr.copy()
+    bad = ~np.isfinite(arr)
+    if np.any(bad):
+        arr[bad] = 0.0
+    return arr
+
+
 def process_single_csv(csv_path, model, DEVICE, output_dir=None):
+    """Run inference on a single CSV and produce per-channel visualizations."""
     print(f"Processing: {csv_path}")
     df = pd.read_csv(csv_path)
-    
-    # Format exactly matching Conditional Transformer exports
-    # Map lowercase 'x', 'y' to uppercase if export varied
+
+    # Column renaming (Grasshopper / CT exports)
     rename_map = {"X": "X_coords", "Y": "Y_coords", "x": "X_coords", "y": "Y_coords", "U_at_z": "U_over_Uref"}
     for old, new in rename_map.items():
         if old in df.columns and new not in df.columns:
             df.rename(columns={old: new}, inplace=True)
-            
-    try:
-        t_col = next((c for c in ["mag_U", "actual_U", "mag_U_dimensionless"] if c in df.columns))
-        t_flat = df[t_col].to_numpy().copy()
-        # Fix noise in Ground Truth (inf or NaN)
-        bad_mask = ~np.isfinite(t_flat)
-        if np.any(bad_mask):
-            print(f"  Warning: Found {np.sum(bad_mask)} non-finite values in Ground Truth. Zeroing them out for metrics.")
-            t_flat[bad_mask] = 0.0
-    except StopIteration:
-        print("Warning: Ground truth target wind 'mag_U' not found in CSV. Visual Error plot will be skipped.")
-        t_flat = None
-        
-    # Standardize data blocks
+
+    # Build input tensor
     gh = {c: df[c].to_numpy() for c in ["SDF", "Bldg_height", "Z_relative", "U_over_Uref", "X_coords", "Y_coords", "dir_sin", "dir_cos"]}
     X_batch, _ = build_input_tensor_from_gh(gh, device="cpu")
     nx, ny, _, _, idx_map = infer_grid_from_coords_simple(df["X_coords"], df["Y_coords"])
-    
-    # INFERENCE
+    x_input_np = X_batch[0].numpy()  # (8, H, W)
+
+    # --- Detect how many output channels the model produces ---
     with torch.no_grad():
         X_device = X_batch[0].unsqueeze(0).to(DEVICE)
-        pred_delta_t = model(X_device)
-    
-    # De-Normalize
-    p_delta_flat = np.array([pred_delta_t[0, 0, iy, ix].cpu().item() for (iy, ix) in idx_map])
+        pred_all = model(X_device)  # (1, out_ch, H, W)
+    out_ch = pred_all.shape[1]
+    print(f"  Model produces {out_ch} output channel(s)")
+
+    # --- Collect ground-truth columns if available ---
+    gt_columns = {
+        0: _safe_col(df, ["mag_U", "actual_U", "mag_U_dimensionless"]),
+        1: _safe_col(df, ["k", "k_from_U"]),
+        2: _safe_col(df, ["mag_U_roof"]),
+        3: _safe_col(df, ["k_roof", "k_roof_from_U"]),
+    }
+
+    # --- Per-channel masking (matching CT convention) ---
+    bldg_mask_flat = (df["Bldg_height"].to_numpy() > 0)
+    is_inside_building_flat = df['Bldg_height'] > (df['Z_relative'] + 0.01)
+
+    # Reference wind speed for delta_u -> mag_U denormalization
     u_ref_flat = df["U_over_Uref"].to_numpy()
-    p_mag_flat = np.clip(u_ref_flat * (p_delta_flat + 1.0), 0.0, None)
-    
-    # 0. PHYSICAL MASKING (Brutalize ghost winds inside buildings)
-    is_inside_building = df['Bldg_height'] > (df['Z_relative'] + 0.01) # Add tiny epsilon
-    if np.any(is_inside_building):
-        n_masked = np.sum(is_inside_building)
-        p_mag_flat[is_inside_building] = 0.0
-        print(f"  -> Applied building mask to {n_masked} points.")
-    
-    # 1. SAVE CSV
-    df_out = df.copy()
-    df_out['mag_U_pred'] = p_mag_flat  # Use exact same column header as CT
-    
+
+    # --- Output paths ---
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
         base = os.path.splitext(os.path.basename(csv_path))[0]
-        csv_out = os.path.join(output_dir, f"{base}_pred.csv")
-        png_out = os.path.join(output_dir, f"{base}_pred.png")
     else:
         base = os.path.splitext(csv_path)[0]
-        csv_out = f"{base}_pred.csv"
-        png_out = f"{base}_pred.png"
-        
-    df_out.to_csv(csv_out, index=False)
-    print(f"  -> Saved Grasshopper CSV Map: {csv_out}")
+        output_dir = os.path.dirname(csv_path) or "."
 
-    # 2. SAVE PNG VISUALS 
-    p_mag_grid = np.zeros((ny, nx))
-    target_mag = np.zeros((ny, nx)) if t_flat is not None else None
-    
+    # --- Denormalize & visualize each channel ---
+    df_out = df.copy()
+    channel_names = CHANNEL_NAMES[:out_ch]
+    channel_vmaxes = CHANNEL_VMAXES[:out_ch]
+
+    # Build per-channel 2D masks for visualization
+    # Channel 0,1 (pedestrian): mask building interiors
+    # Channel 2,3 (roof):      mask open ground
+    bldg_grid = np.zeros((ny, nx), dtype=bool)
     for i, (iy, ix) in enumerate(idx_map):
-        p_mag_grid[iy, ix] = p_mag_flat[i]
-        if target_mag is not None:
-            target_mag[iy, ix] = t_flat[i]
-            
-    # Always save visuals, even if GT is missing
-    if target_mag is None:
-        target_mag = np.zeros_like(p_mag_grid)
-        has_gt = False
-    else:
-        has_gt = True
-        
-    save_pred_vs_true(p_mag_grid, target_mag, png_out, X_batch[0].numpy(), has_gt=has_gt)
-    print(f"  -> Saved Visual Plot: {png_out}")
+        bldg_grid[iy, ix] = bldg_mask_flat[i]
+    open_gnd_grid = ~bldg_grid
+    ch_extra_masks = [bldg_grid, bldg_grid, open_gnd_grid, open_gnd_grid]
 
+    for ch_idx, (ch_name, ch_vmax) in enumerate(zip(channel_names, channel_vmaxes)):
+        if ch_idx >= out_ch:
+            break
+
+        # Extract raw prediction for this channel
+        pred_flat = np.array([pred_all[0, ch_idx, iy, ix].cpu().item() for (iy, ix) in idx_map])
+
+        # Denormalize wind speed channels (ch0=U, ch2=U_roof): delta_u -> mag_U
+        if ch_idx in (0, 2):
+            pred_mag_flat = np.clip(u_ref_flat * (pred_flat + 1.0), 0.0, None)
+        else:
+            # TKE channels (ch1=k, ch3=k_roof): already raw, just clip non-negative
+            pred_mag_flat = np.maximum(pred_flat, 0.0)
+
+        # Physical masking: zero out inside buildings for pedestrian channels
+        if ch_idx in (0, 1) and np.any(is_inside_building_flat):
+            pred_mag_flat[is_inside_building_flat] = 0.0
+
+        # Save prediction to CSV
+        df_out[f'{ch_name}_pred'] = pred_mag_flat
+
+        # Build 2D grids for visualization
+        pred_grid = np.zeros((ny, nx))
+        gt_grid = np.zeros((ny, nx))
+        has_gt = gt_columns.get(ch_idx) is not None
+
+        if has_gt:
+            gt_flat = _clean_flat(df[gt_columns[ch_idx]].to_numpy())
+
+        for i, (iy, ix) in enumerate(idx_map):
+            pred_grid[iy, ix] = pred_mag_flat[i]
+            if has_gt:
+                gt_grid[iy, ix] = gt_flat[i]
+
+        # Save per-channel visualization
+        png_out = os.path.join(output_dir, f"{base}_pred_{ch_name}.png")
+        save_pred_vs_true(
+            pred_grid, gt_grid, png_out,
+            x_input=x_input_np,
+            has_gt=has_gt,
+            vmax=ch_vmax,
+            channel_label=ch_name,
+            extra_mask=ch_extra_masks[ch_idx] if ch_idx < len(ch_extra_masks) else None,
+        )
+
+    # Save combined CSV
+    csv_out = os.path.join(output_dir, f"{base}_pred.csv")
+    df_out.to_csv(csv_out, index=False)
+    print(f"  -> Saved prediction CSV: {csv_out}")
+    print(f"  -> Channels visualized: {', '.join(channel_names)}")
+
+
+# ================================================================
+# CLI
+# ================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="FNO CSV Exporter matching Transformer Format")
+    parser = argparse.ArgumentParser(description="FNO CSV Inference — Multi-Channel")
     parser.add_argument("--csv", type=str, required=True, help="Input CSV file or directory containing CSVs")
     parser.add_argument("--model", type=str, required=True, help="Path to your .pth weights file")
     parser.add_argument("--model_type", type=str, required=True, choices=["standard", "hybrid", "pinn", "geo"], help="The architecture used to train the weights")
     parser.add_argument("--output_dir", type=str, default=None, help="Folder to save the output CSVs")
     args = parser.parse_args()
-    
+
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     state_dict = load_weights(args.model, DEVICE)
     model = build_model(args.model_type, state_dict, DEVICE)
-    
+
     if os.path.isdir(args.csv):
         files = glob.glob(os.path.join(args.csv, "*.csv"))
         files = [f for f in files if "_pred" not in os.path.basename(f)]

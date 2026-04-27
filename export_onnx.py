@@ -43,7 +43,7 @@ import torch.nn as nn
 # ================================================================
 IMG_H, IMG_W = 504, 504
 X_CH = 8
-Y_CH = 1
+Y_CH = 4  # ch0: mag_U, ch1: k, ch2: mag_U_roof, ch3: k_roof
 
 # Pix2PixHD defaults
 NGF = 64
