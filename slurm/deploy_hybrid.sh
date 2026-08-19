@@ -38,11 +38,14 @@ fi
 ICE_SECTION=$(sed -n '/^\[ice\]/,/^\s*\[/p' "$ICE_CONFIG_FILE")
 [ -z "$ICE_SECTION" ] && ICE_SECTION=$(sed -n '/^\[ice\]/,$p' "$ICE_CONFIG_FILE")
 
-ICE_ACCOUNT=$(echo   "$ICE_SECTION" | grep -E "^\s*account\s*="   | sed 's/.*=\s*//;s/[" ]//g;s/#.*//')
-ICE_PARTITION=$(echo "$ICE_SECTION" | grep -E "^\s*partition\s*="  | sed 's/.*=\s*//;s/[" ]//g;s/#.*//')
-ICE_WALLTIME=$(echo  "$ICE_SECTION" | grep -E "^\s*walltime\s*="   | sed 's/.*=\s*//;s/[" ]//g;s/#.*//')
+# If account not found in config.local.toml, fall back to config.toml
+if [ -z "$ICE_ACCOUNT" ] && [ -f "$CONFIG_FILE" ]; then
+    MAIN_ICE_SECTION=$(sed -n '/^\[ice\]/,/^\s*\[/p' "$CONFIG_FILE")
+    [ -z "$MAIN_ICE_SECTION" ] && MAIN_ICE_SECTION=$(sed -n '/^\[ice\]/,$p' "$CONFIG_FILE")
+    ICE_ACCOUNT=$(echo "$MAIN_ICE_SECTION" | grep -E "^\s*account\s*=" | sed 's/.*=\s*//;s/[" ]//g;s/#.*//')
+fi
 
-[ -z "$ICE_ACCOUNT"  ] && ICE_ACCOUNT="coa"
+[ -z "$ICE_ACCOUNT"  ] && ICE_ACCOUNT="gts-pkastner3"
 [ -z "$ICE_WALLTIME" ] && ICE_WALLTIME="08:00:00"
 
 GPU_TYPE_UPPER=$(echo "$GPU_TYPE" | tr '[:lower:]' '[:upper:]')

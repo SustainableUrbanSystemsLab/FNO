@@ -64,7 +64,7 @@ fi
 
 # Fallback if parsing failed
 if [ -z "$ICE_ACCOUNT" ]; then
-    ICE_ACCOUNT="coc"
+    ICE_ACCOUNT="gts-pkastner3"
 fi
 
 if [ -z "$ICE_WALLTIME" ]; then
