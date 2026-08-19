@@ -48,8 +48,11 @@ fi
 [ -z "$ICE_ACCOUNT"  ] && ICE_ACCOUNT="gts-pkastner3"
 [ -z "$ICE_WALLTIME" ] && ICE_WALLTIME="08:00:00"
 
-GPU_TYPE_UPPER=$(echo "$GPU_TYPE" | tr '[:lower:]' '[:upper:]')
-SLURM_GPU="${GPU_TYPE_UPPER}:${NUM_GPUS}"
+GPU_TYPE_LOWER=$(echo "$GPU_TYPE" | tr '[:upper:]' '[:lower:]')
+case $GPU_TYPE_LOWER in
+    any)  SLURM_GPU="${NUM_GPUS}" ;;
+    *)    GPU_TYPE_UPPER=$(echo "$GPU_TYPE" | tr '[:lower:]' '[:upper:]'); SLURM_GPU="${GPU_TYPE_UPPER}:${NUM_GPUS}" ;;
+esac
 
 echo "=========================================="
 echo " Deploying HybridFNO on ICE"
