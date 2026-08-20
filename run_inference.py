@@ -57,15 +57,26 @@ def main():
     args = parser.parse_args()
     conf = SCENARIOS[args.scenario]
     ckpt_path = args.checkpoint if args.checkpoint else conf["checkpoint"]
-    device = torch.device(args.device)
+    if not os.path.exists(ckpt_path):
+        # Smart fallback detection for standard model naming variations
+        fallbacks = []
+        if args.scenario == "STANDARD":
+            fallbacks = ["fno_mag_weights.pth", "fno_weights.pth", "fno_test_weights.pth", "fno_model.pth"]
+        elif args.scenario == "HYBRID":
+            fallbacks = ["hybrid_weights.pth", "hybrid_fno_weights.pth", "fno_hybrid_weights.pth"]
+        elif args.scenario == "PINN":
+            fallbacks = ["pinn_weights.pth", "pinn_fno_weights.pth", "fno_pinn_weights.pth"]
+        elif args.scenario == "GEO":
+            fallbacks = ["geo_weights.pth", "geo_fno_weights.pth", "fno_geo_weights.pth"]
 
-    print(f"\n>>> Running FNO Inference: {conf['name']}")
-    print(f">>> Scenario Info: {conf['desc']}")
-    print(f">>> Expected Checkpoint: {ckpt_path}")
-    print(f">>> Hardware Device: {device}\n")
+        for fb in fallbacks:
+            if os.path.exists(fb):
+                print(f"[Info] Default checkpoint '{ckpt_path}' not found. Auto-detected fallback: '{fb}'")
+                ckpt_path = fb
+                break
 
     if not os.path.exists(ckpt_path):
-        print(f"Error: Could not find exactly '{ckpt_path}'. Put your trained model here or use --checkpoint to point to it.")
+        print(f"Error: Could not find checkpoint file '{ckpt_path}'. Specify your model with --checkpoint <path.pth>")
         sys.exit(1)
 
     # 1. Load Model Framework
