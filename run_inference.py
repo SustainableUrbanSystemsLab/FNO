@@ -99,17 +99,88 @@ def main():
     state_dict = load_weights(ckpt_path, device)
     model = build_model(conf["type"], state_dict, device)
 
-    # 2. Process Data dynamically
-    os.makedirs(args.output_dir, exist_ok=True)
+    # 2. Standardized Timestamped Results Folder
+    from datetime import datetime
+    import json
+
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ckpt_name_clean = os.path.splitext(os.path.basename(ckpt_path))[0]
+    folder_name = f"{args.scenario}_{ckpt_name_clean}_{timestamp_str}"
+    
+    # If user provided default results/inference or a specific root folder, nest timestamped subfolder
+    if args.output_dir == "results/inference":
+        target_out_dir = os.path.join("results/inference", folder_name)
+    else:
+        target_out_dir = os.path.join(args.output_dir, folder_name)
+
+    os.makedirs(target_out_dir, exist_ok=True)
+
+    print(f"\n==================================================")
+    print(f" STANDARDIZED INFERENCE RUN INITIALIZED")
+    print(f"==================================================")
+    print(f"  Scenario:      {conf['name']} ({args.scenario})")
+    print(f"  Checkpoint:    {os.path.abspath(ckpt_path)}")
+    ckpt_stat = os.stat(ckpt_path)
+    ckpt_size_mb = ckpt_stat.st_size / (1024 * 1024)
+    ckpt_mtime = datetime.fromtimestamp(ckpt_stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    print(f"  Checkpoint Sz: {ckpt_size_mb:.2f} MB (Modified: {ckpt_mtime})")
+    print(f"  Input Data:    {os.path.abspath(args.csv)}")
+    print(f"  Output Dir:    {os.path.abspath(target_out_dir)}")
+    print(f"  Device:        {device}")
+    print(f"==================================================\n")
+
+    # 3. Execute Inference
     if os.path.isdir(args.csv):
         files = glob.glob(os.path.join(args.csv, "*.csv"))
         files = [f for f in files if "_pred" not in os.path.basename(f)]
         for f in files: 
-            process_single_csv(f, model, device, args.output_dir)
+            process_single_csv(f, model, device, target_out_dir)
     else:
-        process_single_csv(args.csv, model, device, args.output_dir)
-        
-    print(f"\nDone! Results successfully populated in -> {args.output_dir}")
+        process_single_csv(args.csv, model, device, target_out_dir)
+
+    # 4. Generate Metadata Summary File inside output directory
+    generated_files = sorted(os.listdir(target_out_dir))
+    
+    summary_txt_path = os.path.join(target_out_dir, "inference_summary.txt")
+    with open(summary_txt_path, "w") as f:
+        f.write("======================================================================\n")
+        f.write(" FNO INFERENCE RUN SUMMARY & METADATA LOG\n")
+        f.write("======================================================================\n")
+        f.write(f"Run Timestamp:        {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Scenario Name:        {conf['name']} ({args.scenario})\n")
+        f.write(f"Scenario Description: {conf['desc']}\n")
+        f.write(f"Checkpoint File:      {os.path.abspath(ckpt_path)}\n")
+        f.write(f"Checkpoint Size:      {ckpt_size_mb:.2f} MB\n")
+        f.write(f"Checkpoint Modified:  {ckpt_mtime}\n")
+        f.write(f"Input Data Source:    {os.path.abspath(args.csv)}\n")
+        f.write(f"Hardware Device:      {device}\n")
+        f.write(f"Output Directory:     {os.path.abspath(target_out_dir)}\n")
+        f.write("======================================================================\n")
+        f.write("Generated Output Files:\n")
+        for gf in generated_files:
+            f.write(f"  - {gf}\n")
+        f.write("======================================================================\n")
+
+    metadata_json_path = os.path.join(target_out_dir, "metadata.json")
+    metadata_dict = {
+        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        "scenario": args.scenario,
+        "scenario_name": conf['name'],
+        "checkpoint_file": os.path.abspath(ckpt_path),
+        "checkpoint_size_mb": round(ckpt_size_mb, 2),
+        "checkpoint_modified": ckpt_mtime,
+        "input_csv": os.path.abspath(args.csv),
+        "device": str(device),
+        "output_directory": os.path.abspath(target_out_dir),
+        "generated_files": generated_files
+    }
+    with open(metadata_json_path, "w") as f:
+        json.dump(metadata_dict, f, indent=2)
+
+    print(f"\n[SUCCESS] Inference run complete!")
+    print(f"  -> Results folder: {os.path.abspath(target_out_dir)}")
+    print(f"  -> Summary file:   {os.path.abspath(summary_txt_path)}")
+    print(f"  -> Metadata JSON:  {os.path.abspath(metadata_json_path)}")
 
 if __name__ == "__main__":
     main()
