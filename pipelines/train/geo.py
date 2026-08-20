@@ -87,7 +87,7 @@ def main():
         BATCH   = config.get('training', {}).get('batch_size', 16)
         EPOCHS  = config.get('training', {}).get('epochs', 100)
         LR      = config.get('training', {}).get('learning_rate', 1e-4)
-        MODEL_OUT = config.get('paths', {}).get('model_checkpoint', 'fno_weights.pth')
+        MODEL_OUT = config.get('paths', {}).get('model_checkpoint', 'geo_fno_weights.pth')
         _nw = config.get('performance', {}).get('num_workers', 0)
         if _nw > 0:
             NUM_WORKERS = _nw

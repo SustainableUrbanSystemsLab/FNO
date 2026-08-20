@@ -67,13 +67,22 @@ def main():
         elif args.scenario == "PINN":
             fallbacks = ["pinn_weights.pth", "pinn_fno_weights.pth", "fno_pinn_weights.pth"]
         elif args.scenario == "GEO":
-            fallbacks = ["geo_weights.pth", "geo_fno_weights.pth", "fno_geo_weights.pth"]
+            fallbacks = ["geo_fno_weights.pth", "geo_weights.pth", "fno_geo_weights.pth", "fno_weights.pth"]
 
+        # Check explicit fallbacks first
         for fb in fallbacks:
             if os.path.exists(fb):
                 print(f"[Info] Default checkpoint '{ckpt_path}' not found. Auto-detected fallback: '{fb}'")
                 ckpt_path = fb
                 break
+
+        # Check inside epochs/ folder if still not found
+        if not os.path.exists(ckpt_path) and os.path.exists("epochs"):
+            ep_prefix = args.scenario.lower()
+            matching_eps = sorted(glob.glob(f"epochs/{ep_prefix}_*.pth") + glob.glob("epochs/checkpoint_*.pth"))
+            if matching_eps:
+                ckpt_path = matching_eps[-1]  # Pick latest epoch checkpoint
+                print(f"[Info] Auto-detected latest epoch checkpoint: '{ckpt_path}'")
 
     if not os.path.exists(ckpt_path):
         print(f"Error: Could not find checkpoint file '{ckpt_path}'. Specify your model with --checkpoint <path.pth>")
