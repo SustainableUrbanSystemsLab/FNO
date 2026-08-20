@@ -79,6 +79,13 @@ def main():
         print(f"Error: Could not find checkpoint file '{ckpt_path}'. Specify your model with --checkpoint <path.pth>")
         sys.exit(1)
 
+    device = torch.device(args.device)
+
+    print(f"\n>>> Running FNO Inference: {conf['name']}")
+    print(f">>> Scenario Info: {conf['desc']}")
+    print(f">>> Target Checkpoint: {ckpt_path}")
+    print(f">>> Hardware Device: {device}\n")
+
     # 1. Load Model Framework
     state_dict = load_weights(ckpt_path, device)
     model = build_model(conf["type"], state_dict, device)
