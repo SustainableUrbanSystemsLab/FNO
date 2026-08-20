@@ -12,6 +12,8 @@ RESET_PATIENCE=""
 FRESH_TRAIN=""
 TRAIN_SCRIPT="pipelines/train/distributed.py"
 
+JOB_NAME=""
+
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -19,6 +21,7 @@ while [[ "$#" -gt 0 ]]; do
         --ngpus) NUM_GPUS="$2"; shift ;;
         --config) CONFIG_FILE="$2"; shift ;;
         --script) TRAIN_SCRIPT="$2"; shift ;;
+        --job-name|--name) JOB_NAME="$2"; shift ;;
         --reset-patience) RESET_PATIENCE="1" ;;
         --fresh) FRESH_TRAIN="1" ;;
         *) echo "Unknown parameter passed: $1"; exit 1 ;;
@@ -71,19 +74,32 @@ if [ -z "$ICE_WALLTIME" ]; then
     ICE_WALLTIME="12:00:00"  # 12 hour fallback for safety
 fi
 
+# Auto-detect job name from script if not provided
+if [ -z "$JOB_NAME" ]; then
+    SCRIPT_BASE=$(basename "$TRAIN_SCRIPT" .py)
+    case $SCRIPT_BASE in
+        distributed|standard) JOB_NAME="fno_standard" ;;
+        geo)         JOB_NAME="fno_geo" ;;
+        pinn)        JOB_NAME="fno_pinn" ;;
+        hybrid)      JOB_NAME="fno_hybrid" ;;
+        *)           JOB_NAME="fno_${SCRIPT_BASE}" ;;
+    esac
+fi
+
 echo "=========================================="
 echo " Preparing ICE Deployment"
+echo " Job Name:      $JOB_NAME"
 echo " GPU Requested: $GPU_TYPE x $NUM_GPUS ($SLURM_GPU)"
-echo " Config file: $CONFIG_FILE"
-echo " Account: $ICE_ACCOUNT"
-echo " Walltime: $ICE_WALLTIME (Source: $SOURCE)"
+echo " Config file:   $CONFIG_FILE"
+echo " Account:       $ICE_ACCOUNT"
+echo " Walltime:      $ICE_WALLTIME (Source: $SOURCE)"
 echo "=========================================="
 
 mkdir -p logs
 
 # Build sbatch command
 # Note: ICE might need specific partition if gpu is not default
-SBATCH_CMD="sbatch --gres=gpu:$SLURM_GPU --account=$ICE_ACCOUNT --time=$ICE_WALLTIME --export=NUM_GPUS=$NUM_GPUS,CONFIG_FILE=$CONFIG_FILE,RESET_PATIENCE=$RESET_PATIENCE,FRESH_TRAIN=$FRESH_TRAIN,TRAIN_SCRIPT=$TRAIN_SCRIPT"
+SBATCH_CMD="sbatch --job-name=$JOB_NAME --gres=gpu:$SLURM_GPU --account=$ICE_ACCOUNT --time=$ICE_WALLTIME --export=NUM_GPUS=$NUM_GPUS,CONFIG_FILE=$CONFIG_FILE,RESET_PATIENCE=$RESET_PATIENCE,FRESH_TRAIN=$FRESH_TRAIN,TRAIN_SCRIPT=$TRAIN_SCRIPT"
 
 if [ -n "$ICE_PARTITION" ]; then
     SBATCH_CMD="$SBATCH_CMD --partition=$ICE_PARTITION"

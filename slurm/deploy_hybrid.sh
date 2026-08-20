@@ -67,6 +67,7 @@ echo "=========================================="
 mkdir -p logs
 
 SBATCH_CMD="sbatch \
+    --job-name=fno_hybrid \
     --gres=gpu:$SLURM_GPU \
     --account=$ICE_ACCOUNT \
     --time=$ICE_WALLTIME \
