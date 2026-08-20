@@ -426,6 +426,8 @@ def process_single_csv(csv_path, model, DEVICE, output_dir=None):
 
         # Save prediction to CSV
         df_out[f'{ch_name}_pred'] = pred_mag_flat
+        if ch_name == "U":
+            df_out['mag_U_pred'] = pred_mag_flat
 
         # Build 2D grids for visualization
         pred_grid = np.zeros((ny, nx))
