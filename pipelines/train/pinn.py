@@ -122,8 +122,7 @@ def main():
             r_l = 0.0
             for xb, yb in loader:
                 xb, yb = xb.to(device), yb.to(device)
-                sdf = xb[:, 0:1, :, :]
-                mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+                mb = torch.ones_like(xb[:, 0:1, :, :])
                 pred = model(xb)
                 loss, _ = pinn_loss(pred, yb, x_input=xb, sensor_mask=mb, grad_weight=GRAD_W, continuity_weight=CONT_W, momentum_weight=MOM_W, wake_weight=WAKE_W, peak_weight=PEAK_W)
                 opt.zero_grad(); loss.backward(); opt.step()

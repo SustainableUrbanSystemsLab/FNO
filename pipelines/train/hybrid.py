@@ -111,8 +111,7 @@ def main():
             r_l = 0.0
             for xb, yb in loader:
                 xb, yb = xb.to(device), yb.to(device)
-                sdf = xb[:, 0:1, :, :]
-                mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+                mb = torch.ones_like(xb[:, 0:1, :, :])
                 pred = model(xb)
                 loss = sensor_weighted_mse(pred, yb, sensor_mask=mb) # Standard hybrid loss
                 opt.zero_grad(); loss.backward(); opt.step()
@@ -123,7 +122,7 @@ def main():
             with torch.no_grad():
                 for xb, yb in v_loader:
                     xb, yb = xb.to(device), yb.to(device)
-                    v_l = sensor_weighted_mse(model(xb), yb, sensor_mask=torch.where(xb[:,0:1]>0, 1.0, 0.2))
+                    v_l = sensor_weighted_mse(model(xb), yb, sensor_mask=torch.ones_like(xb[:, 0:1, :, :]))
                     v_l_acc += v_l.item() * xb.shape[0]
 
             if is_distributed:

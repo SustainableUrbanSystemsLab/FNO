@@ -65,11 +65,11 @@ WIDTH = config.get('model', {}).get('width', 64)
 N_LAYERS = config.get('model', {}).get('n_layers', 5)
 # FIX: physics terms now ramp from 0 over WARMUP_EPOCHS
 # to prevent the model collapsing to a flat constant field early in training.
-GRAD_WEIGHT     = config.get('loss', {}).get('gradient_weight', 0.5)
-SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.05)
-PEAK_WEIGHT     = config.get('loss', {}).get('peak_weight', 0.3)
-WAKE_WEIGHT     = config.get('loss', {}).get('wake_weight', 0.3)
-WARMUP_EPOCHS   = config.get('loss', {}).get('warmup_epochs', 50)
+GRAD_WEIGHT     = config.get('loss', {}).get('gradient_weight', 1.5)
+SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.001)
+PEAK_WEIGHT     = config.get('loss', {}).get('peak_weight', 0.5)
+WAKE_WEIGHT     = config.get('loss', {}).get('wake_weight', 1.0)
+WARMUP_EPOCHS   = config.get('loss', {}).get('warmup_epochs', 10)
 
 def get_loss_weights(epoch):
     # Linearly ramp physics weights from 0 to their max over WARMUP_EPOCHS.
@@ -531,10 +531,8 @@ def main():
             yb = yb.to(device)
 
             # Build mask from SDF channel (Channel 0, physically normalized: SDF/200)
-            # SDF=0 means building boundary, SDF>0 means outside building
-            # After /200 normalization, SDF>0 still correctly identifies exterior
-            sdf = xb[:, 0:1, :, :]
-            mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+            # Full domain & boundary loss weighting
+            mb = torch.ones_like(xb[:, 0:1, :, :])
 
             pred = model(xb)
 
@@ -568,8 +566,7 @@ def main():
             for batch in val_loader:
                 xb, yb = batch
                 xb = xb.to(device); yb = yb.to(device)
-                sdf = xb[:, 0:1, :, :]
-                mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+                mb = torch.ones_like(xb[:, 0:1, :, :])
                 pred = model(xb)
                 # Use same loss weights as training for consistency in validation loss
                 w = get_loss_weights(epoch)
