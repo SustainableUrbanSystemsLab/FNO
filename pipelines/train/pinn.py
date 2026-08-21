@@ -56,7 +56,7 @@ def main():
         MODES1, MODES2 = MC.get('modes1', 64), MC.get('modes2', 64)
         WIDTH, N_LAYERS = MC.get('width', 32), MC.get('n_layers', 4)
         BATCH, EPOCHS, LR = TC.get('batch_size', 16), TC.get('epochs', 100), TC.get('learning_rate', 1e-4)
-        MODEL_OUT = config.get('paths', {}).get('model_checkpoint', 'pinn_weights.pth')
+        MODEL_OUT = config.get('paths', {}).get('model_checkpoint', 'pinn_fno_weights.pth')
         _nw = config.get('performance', {}).get('num_workers', 0)
         if _nw > 0:
             NUM_WORKERS = _nw
@@ -65,11 +65,11 @@ def main():
         else:
             NUM_WORKERS = max(1, cpu_count() // 2)
         
-        GRAD_W = LC.get('gradient_weight', 1.0)
-        CONT_W = LC.get('continuity_weight', 0.1)
-        MOM_W  = LC.get('momentum_weight', 0.1)
-        PEAK_W = LC.get('peak_weight', 0.1)
-        WAKE_W = LC.get('wake_weight', 10.0)
+        GRAD_W = LC.get('gradient_weight', 1.5)
+        CONT_W = LC.get('continuity_weight', 0.05)
+        MOM_W  = LC.get('momentum_weight', 0.01)
+        PEAK_W = LC.get('peak_weight', 0.5)
+        WAKE_W = LC.get('wake_weight', 1.0)
 
         # 2. Data
         DATA_FOLDER = config.get('paths', {}).get('data_folder_ice', 'train_csv')

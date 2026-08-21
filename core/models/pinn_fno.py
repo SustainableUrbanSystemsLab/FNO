@@ -161,7 +161,7 @@ def momentum_smoothness_loss(u_field):
     return torch.mean(torch.clamp(laplacian ** 2 - 0.01, min=0.0))
 
 
-def wake_physics_loss(pred, target, sdf, wake_threshold=-0.5, sdf_threshold=0.05):
+def wake_physics_loss(pred, target, sdf, wake_threshold=-0.2, sdf_threshold=0.05):
     """
     Physics-aware wake loss:
     - Focuses on regions behind buildings (SDF > threshold, meaning NOT inside a building)
