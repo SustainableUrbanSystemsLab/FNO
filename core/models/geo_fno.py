@@ -23,22 +23,24 @@ class LocalGeometryEncoder(nn.Module):
 
 class BoundaryReconstructor(nn.Module):
     """
-    A high-frequency spatial decoder that re-injects the physical geometry mask (SDF) 
+    A high-frequency spatial decoder that re-injects the physical geometry mask (SDF, Bldg_height, U_ref)
     at the very end of the network. This prevents the FNO's spectral blurring 
     from bleeding into the building wakes.
     """
-    def __init__(self, fno_channels, out_channels):
+    def __init__(self, fno_channels, in_channels, out_channels):
         super().__init__()
-        # Takes the FNO flow output + original SDF
+        # Takes the FNO flow output + full input conditioning tensor
         self.decode = nn.Sequential(
-            nn.Conv2d(fno_channels + 1, fno_channels // 2, kernel_size=3, padding=1),
+            nn.Conv2d(fno_channels + in_channels, fno_channels, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv2d(fno_channels, fno_channels // 2, kernel_size=3, padding=1),
             nn.GELU(),
             nn.Conv2d(fno_channels // 2, out_channels, kernel_size=1)
         )
 
-    def forward(self, fno_out, sdf):
-        # Concatenate SDF as a hard physical boundary constraint
-        x = torch.cat([fno_out, sdf], dim=1)
+    def forward(self, fno_out, raw_x):
+        # Concatenate raw physical geometry + wind conditions as hard boundary constraint
+        x = torch.cat([fno_out, raw_x], dim=1)
         return self.decode(x)
 
 class GeoFNO(nn.Module):
@@ -66,17 +68,14 @@ class GeoFNO(nn.Module):
         )
         
         # 3. Sharp Boundary Reconstructor
-        self.reconstruct = BoundaryReconstructor(fno_channels=hidden_channels, out_channels=out_channels)
+        self.reconstruct = BoundaryReconstructor(fno_channels=hidden_channels, in_channels=in_channels, out_channels=out_channels)
 
     def forward(self, x):
-        # Extract the SDF channel (assuming it is channel 0 based on our data pipeline)
-        sdf = x[:, 0:1, :, :]
-        
         # Map physical space to latent continuous geometry
         latent_geo = self.geo_encode(x)
         
-        # Calculate global fluid dynamics (this will be blurry)
+        # Calculate global fluid dynamics
         flow_field = self.fno(latent_geo)
         
-        # Re-inject the physical geometry to force exact, sharp boundaries and wakes
-        return self.reconstruct(flow_field, sdf)
+        # Re-inject physical geometry to force exact, sharp boundaries and wakes
+        return self.reconstruct(flow_field, x)

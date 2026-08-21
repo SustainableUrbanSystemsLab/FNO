@@ -97,16 +97,16 @@ def main():
             NUM_WORKERS = max(1, cpu_count() // 2)
         CHECKPOINT_INTERVAL = config.get('training', {}).get('checkpoint_interval', 10)
 
-        # Physics Weights (ramp up)
-        PEAK_W   = config.get('loss', {}).get('peak_weight', 0.1)
-        WAKE_W   = config.get('loss', {}).get('wake_weight', 10.0)
-        GRAD_W   = config.get('loss', {}).get('gradient_weight', 1.0)
-        SPEC_W   = config.get('loss', {}).get('spectral_weight', 1.0)
+        # Physics Weights (balanced with MSE to prevent zero-velocity field collapse)
+        PEAK_W   = config.get('loss', {}).get('peak_weight', 0.5)
+        WAKE_W   = config.get('loss', {}).get('wake_weight', 1.0)
+        GRAD_W   = config.get('loss', {}).get('gradient_weight', 1.5)
+        SPEC_W   = config.get('loss', {}).get('spectral_weight', 0.001)
 
         def get_loss_weights(epoch):
             t = min(1.0, epoch / 30.0) 
             return {
-                'grad_weight': GRAD_W,
+                'grad_weight': GRAD_W * t,
                 'spectral_weight': SPEC_W * t,
                 'peak_weight': PEAK_W * t,
                 'wake_weight': WAKE_W * t,
@@ -169,8 +169,7 @@ def main():
             
             for xb, yb in loader:
                 xb, yb = xb.to(device), yb.to(device)
-                sdf = xb[:, 0:1, :, :]
-                mb = torch.where(sdf > 0, torch.ones_like(sdf), torch.full_like(sdf, 0.2))
+                mb = torch.ones_like(xb[:, 0:1, :, :])
                 pred = model(xb)
                 w = get_loss_weights(epoch)
                 loss, comps = sensor_weighted_mse(
@@ -194,7 +193,7 @@ def main():
             with torch.no_grad():
                 for xb, yb in val_loader:
                     xb, yb = xb.to(device), yb.to(device)
-                    mb = torch.where(xb[:,0:1]>0, torch.ones(1,device=device), torch.full((1,), 0.2, device=device))
+                    mb = torch.ones_like(xb[:, 0:1, :, :])
                     v_l = sensor_weighted_mse(model(xb), yb, sensor_mask=mb, **get_loss_weights(epoch), wake_threshold=-0.5)
                     v_loss_acc += v_l.item() * xb.shape[0]
 
