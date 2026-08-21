@@ -54,15 +54,21 @@ def main():
         MODES1, MODES2 = config.get('model', {}).get('modes1', 64), config.get('model', {}).get('modes2', 64)
         WIDTH = config.get('model', {}).get('width', 32)
         BATCH, EPOCHS, LR = TC.get('batch_size', 16), TC.get('epochs', 100), TC.get('learning_rate', 1e-4)
-        MODEL_OUT = config.get('paths', {}).get('model_checkpoint', 'hybrid_weights.pth')
-        _nw = config.get('performance', {}).get('num_workers', 0)
-        if _nw > 0:
-            NUM_WORKERS = _nw
-        elif sys.platform == 'win32':
-            NUM_WORKERS = min(8, max(1, cpu_count() // 2))
-        else:
-            NUM_WORKERS = max(1, cpu_count() // 2)
-        
+        GRAD_W = config.get('loss', {}).get('gradient_weight', 1.5)
+        SPEC_W = config.get('loss', {}).get('spectral_weight', 0.001)
+        PEAK_W = config.get('loss', {}).get('peak_weight', 0.5)
+        WAKE_W = config.get('loss', {}).get('wake_weight', 1.0)
+        MODEL_OUT = config.get('paths', {}).get('model_checkpoint', 'hybrid_fno_weights.pth')
+
+        def get_loss_weights(epoch):
+            t = min(1.0, epoch / 30.0)
+            return {
+                'grad_weight': GRAD_W * t,
+                'spectral_weight': SPEC_W * t,
+                'peak_weight': PEAK_W * t,
+                'wake_weight': WAKE_W * t,
+            }
+
         # 2. Data
         DATA_FOLDER = config.get('paths',{}).get('data_folder_ice', 'train_csv')
         x_p, y_p = os.path.join(DATA_FOLDER, 'X.npy'), os.path.join(DATA_FOLDER, 'Y.npy')
@@ -109,11 +115,19 @@ def main():
             if is_distributed: t_samp.set_epoch(ep)
             model.train()
             r_l = 0.0
+            w = get_loss_weights(ep)
             for xb, yb in loader:
                 xb, yb = xb.to(device), yb.to(device)
                 mb = torch.ones_like(xb[:, 0:1, :, :])
                 pred = model(xb)
-                loss = sensor_weighted_mse(pred, yb, sensor_mask=mb) # Standard hybrid loss
+                loss = sensor_weighted_mse(
+                    pred, yb, sensor_mask=mb,
+                    grad_weight=w['grad_weight'],
+                    spectral_weight=w['spectral_weight'],
+                    peak_weight=w['peak_weight'],
+                    wake_weight=w['wake_weight'],
+                    wake_threshold=-0.5
+                )
                 opt.zero_grad(); loss.backward(); opt.step()
                 r_l += loss.item() * xb.shape[0]
 
@@ -122,7 +136,11 @@ def main():
             with torch.no_grad():
                 for xb, yb in v_loader:
                     xb, yb = xb.to(device), yb.to(device)
-                    v_l = sensor_weighted_mse(model(xb), yb, sensor_mask=torch.ones_like(xb[:, 0:1, :, :]))
+                    v_l = sensor_weighted_mse(
+                        model(xb), yb, sensor_mask=torch.ones_like(xb[:, 0:1, :, :]),
+                        **get_loss_weights(ep), wake_threshold=-0.5
+                    )
+                    v_l_acc += v_l.item() * xb.shape[0]
                     v_l_acc += v_l.item() * xb.shape[0]
 
             if is_distributed:
