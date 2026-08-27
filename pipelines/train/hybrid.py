@@ -59,6 +59,13 @@ def main():
         PEAK_W = config.get('loss', {}).get('peak_weight', 0.5)
         WAKE_W = config.get('loss', {}).get('wake_weight', 1.0)
         MODEL_OUT = config.get('paths', {}).get('model_checkpoint', 'hybrid_fno_weights.pth')
+        _nw = config.get('performance', {}).get('num_workers', 0)
+        if _nw > 0:
+            NUM_WORKERS = _nw
+        elif sys.platform == 'win32':
+            NUM_WORKERS = min(8, max(1, cpu_count() // 2))
+        else:
+            NUM_WORKERS = max(1, cpu_count() // 2)
 
         def get_loss_weights(epoch):
             t = min(1.0, epoch / 30.0)
