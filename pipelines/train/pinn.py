@@ -21,7 +21,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'
 from core.models.pinn_fno import PINNFNO, pinn_loss
 from core.utils.training_logger import TrainingLogger
 from core.utils.config_loader import load_config
-from pipelines.train.distributed import NpyDataset
+from pipelines.train.distributed import NpyDataset, build_channel_mask
 
 def setup_distributed():
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
@@ -122,7 +122,7 @@ def main():
             r_l = 0.0
             for xb, yb in loader:
                 xb, yb = xb.to(device), yb.to(device)
-                mb = torch.ones_like(xb[:, 0:1, :, :])
+                mb = build_channel_mask(xb, out_ch)
                 pred = model(xb)
                 loss, _ = pinn_loss(pred, yb, x_input=xb, sensor_mask=mb, grad_weight=GRAD_W, continuity_weight=CONT_W, momentum_weight=MOM_W, wake_weight=WAKE_W, peak_weight=PEAK_W)
                 opt.zero_grad(); loss.backward(); opt.step()
@@ -133,7 +133,7 @@ def main():
             with torch.no_grad():
                 for xb, yb in v_loader:
                     xb, yb = xb.to(device), yb.to(device)
-                    mb = torch.where(xb[:,0:1]>0, torch.ones_like(xb[:,0:1]), torch.full_like(xb[:,0:1], 0.2))
+                    mb = build_channel_mask(xb, out_ch)
                     v_l, _ = pinn_loss(model(xb), yb, x_input=xb, sensor_mask=mb, grad_weight=GRAD_W, continuity_weight=CONT_W, momentum_weight=MOM_W, wake_weight=WAKE_W, peak_weight=PEAK_W)
                     v_l_acc += v_l.item() * xb.shape[0]
 

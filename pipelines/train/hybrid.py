@@ -22,7 +22,7 @@ from core.models.hybrid import HybridFNO
 from core.models.fno2d import sensor_weighted_mse
 from core.utils.training_logger import TrainingLogger
 from core.utils.config_loader import load_config
-from pipelines.train.distributed import NpyDataset
+from pipelines.train.distributed import NpyDataset, build_channel_mask
 
 def setup_distributed():
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
@@ -118,7 +118,7 @@ def main():
             w = get_loss_weights(ep)
             for xb, yb in loader:
                 xb, yb = xb.to(device), yb.to(device)
-                mb = torch.ones_like(xb[:, 0:1, :, :])
+                mb = build_channel_mask(xb, out_ch)
                 pred = model(xb)
                 loss = sensor_weighted_mse(
                     pred, yb, sensor_mask=mb,
@@ -137,10 +137,9 @@ def main():
                 for xb, yb in v_loader:
                     xb, yb = xb.to(device), yb.to(device)
                     v_l = sensor_weighted_mse(
-                        model(xb), yb, sensor_mask=torch.ones_like(xb[:, 0:1, :, :]),
+                        model(xb), yb, sensor_mask=build_channel_mask(xb, out_ch),
                         **get_loss_weights(ep), wake_threshold=-0.5
                     )
-                    v_l_acc += v_l.item() * xb.shape[0]
                     v_l_acc += v_l.item() * xb.shape[0]
 
             if is_distributed:

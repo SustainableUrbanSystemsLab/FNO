@@ -246,10 +246,18 @@ def pinn_loss(pred, target, x_input, sensor_mask=None,
     wake = wake_physics_loss(pred, target, sdf_ch)
 
     # 6. Peak (extreme velocity) loss
+    # [CHANNEL SELECTIVE] Focus only on primary wind speed channel, matching
+    # continuity/momentum/wake above. The +-0.5 thresholds are calibrated for
+    # delta_u (channel 0); applying them to unrelated channels (e.g. raw k)
+    # was a latent bug once out_channels grew beyond 1.
+    pred_u, target_u = pred, target
+    if pred_u.shape[1] > 1:
+        pred_u = pred_u[:, 0:1]
+        target_u = target_u[:, 0:1]
     hi_thresh = 0.5
     lo_thresh = -0.5
-    peak_mask = ((target >= hi_thresh) | (target <= lo_thresh)).float()
-    peak = ((pred - target) ** 2 * peak_mask).sum() / (peak_mask.sum() + 1e-8)
+    peak_mask = ((target_u >= hi_thresh) | (target_u <= lo_thresh)).float()
+    peak = ((pred_u - target_u) ** 2 * peak_mask).sum() / (peak_mask.sum() + 1e-8)
 
     total = (mse
              + grad_weight        * grad

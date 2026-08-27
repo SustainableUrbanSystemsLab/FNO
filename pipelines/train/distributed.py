@@ -146,6 +146,39 @@ def is_main_process(rank):
 # Output channel metadata (matching Conditional Transformer repo)
 CHANNEL_NAMES  = ["U", "k", "U_roof", "k_roof"]
 CHANNEL_VMAXES = [2.0, 0.5, 2.0, 0.5]
+# "pedestrian" channels are only physically meaningful outside building
+# footprints; "roof" channels only exist on building footprints. Matches the
+# masking convention documented in tools/infer_csv.py.
+CHANNEL_ROLES  = ["pedestrian", "pedestrian", "roof", "roof"]
+
+
+def build_channel_mask(xb, out_ch):
+    """Build a (B, out_ch, H, W) loss mask matching each output channel's
+    valid physical region, derived from the FNO-format input tensor `xb`.
+
+    Bug this fixes: every training loop previously built a 1-channel mask
+    (`torch.ones_like(xb[:, 0:1])`) and passed it into a loss whose numerator
+    sums squared error over ALL output channels but whose denominator summed
+    only that 1-channel mask -- silently inflating mse_loss by ~out_ch once
+    Y went from 1 to 4 channels, and skipping any building/roof masking.
+    Returning a mask shaped exactly like y_pred/y_target fixes both at once.
+
+    For out_ch <= 1 this returns the original full-domain ones mask,
+    preserving single-channel training behavior exactly.
+    """
+    if out_ch <= 1:
+        return torch.ones_like(xb[:, 0:1, :, :])
+
+    bldg = (xb[:, 1:2, :, :] > 0).float()   # FNO Ch1 = Bldg_height / 50
+    open_ground = 1.0 - bldg
+    role_mask = {"pedestrian": open_ground, "roof": bldg}
+
+    channels = [
+        role_mask[CHANNEL_ROLES[i]] if i < len(CHANNEL_ROLES) else torch.ones_like(bldg)
+        for i in range(out_ch)
+    ]
+    return torch.cat(channels, dim=1)
+
 
 # Transformer -> FNO channel index mapping
 _RAW_X_COORDS  = 0
@@ -530,9 +563,7 @@ def main():
             xb = xb.to(device)
             yb = yb.to(device)
 
-            # Build mask from SDF channel (Channel 0, physically normalized: SDF/200)
-            # Full domain & boundary loss weighting
-            mb = torch.ones_like(xb[:, 0:1, :, :])
+            mb = build_channel_mask(xb, out_ch)
 
             pred = model(xb)
 
@@ -566,7 +597,7 @@ def main():
             for batch in val_loader:
                 xb, yb = batch
                 xb = xb.to(device); yb = yb.to(device)
-                mb = torch.ones_like(xb[:, 0:1, :, :])
+                mb = build_channel_mask(xb, out_ch)
                 pred = model(xb)
                 # Use same loss weights as training for consistency in validation loss
                 w = get_loss_weights(epoch)

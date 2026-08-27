@@ -24,7 +24,7 @@ from core.models.fno2d import sensor_weighted_mse
 from core.models.geo_fno import GeoFNO
 from core.utils.training_logger import TrainingLogger
 from core.utils.config_loader import load_config
-from pipelines.train.distributed import NpyDataset
+from pipelines.train.distributed import NpyDataset, build_channel_mask
 
 def setup_distributed():
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
@@ -169,7 +169,7 @@ def main():
             
             for xb, yb in loader:
                 xb, yb = xb.to(device), yb.to(device)
-                mb = torch.ones_like(xb[:, 0:1, :, :])
+                mb = build_channel_mask(xb, out_ch)
                 pred = model(xb)
                 w = get_loss_weights(epoch)
                 loss, comps = sensor_weighted_mse(
@@ -193,7 +193,7 @@ def main():
             with torch.no_grad():
                 for xb, yb in val_loader:
                     xb, yb = xb.to(device), yb.to(device)
-                    mb = torch.ones_like(xb[:, 0:1, :, :])
+                    mb = build_channel_mask(xb, out_ch)
                     v_l = sensor_weighted_mse(model(xb), yb, sensor_mask=mb, **get_loss_weights(epoch), wake_threshold=-0.5)
                     v_loss_acc += v_l.item() * xb.shape[0]
 
