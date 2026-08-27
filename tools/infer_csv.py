@@ -29,6 +29,7 @@ from core.models.pinn_fno import PINNFNO
 from core.models.geo_fno import GeoFNO
 from core.utils.gh_to_fno import build_input_tensor_from_gh, infer_grid_from_coords_simple
 from pipelines.train.distributed import CHANNEL_NAMES, CHANNEL_VMAXES
+from core.utils.target_norm import K_MEAN, K_STD, K_ROOF_MEAN, K_ROOF_STD
 
 
 # ================================================================
@@ -416,9 +417,12 @@ def process_single_csv(csv_path, model, DEVICE, output_dir=None):
         # Denormalize wind speed channels (ch0=U, ch2=U_roof): delta_u -> mag_U
         if ch_idx in (0, 2):
             pred_mag_flat = np.clip(u_ref_flat * (pred_flat + 1.0), 0.0, None)
+        elif ch_idx == 1:
+            # TKE (ch1=k): trained on a z-scored target, undo that first
+            pred_mag_flat = np.maximum(pred_flat * K_STD + K_MEAN, 0.0)
         else:
-            # TKE channels (ch1=k, ch3=k_roof): already raw, just clip non-negative
-            pred_mag_flat = np.maximum(pred_flat, 0.0)
+            # TKE roof (ch3=k_roof): same, using the roof-channel stats
+            pred_mag_flat = np.maximum(pred_flat * K_ROOF_STD + K_ROOF_MEAN, 0.0)
 
         # Physical masking: zero out inside buildings for pedestrian channels
         if ch_idx in (0, 1) and np.any(is_inside_building_flat):

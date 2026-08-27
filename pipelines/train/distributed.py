@@ -16,6 +16,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'
 
 from core.models.fno2d import FNO2d, sensor_weighted_mse
 from core.utils.training_logger import TrainingLogger
+from core.utils.target_norm import normalize_k_channels
 
 # ============ Load Configuration ============
 import argparse
@@ -273,7 +274,10 @@ class NpyDataset(Dataset):
         out_y[0, has_data] = (mag_u[has_data] - u_ref[has_data]) / (u_ref[has_data] + 1e-6)
         out_y[0] = np.clip(out_y[0], -2.0, 10.0)
 
-        # Ch1: k (TKE) — keep raw, ensure non-negative
+        # Ch1: k (TKE) — clamp non-negative, then z-score normalize.
+        # Raw TKE is on a very different scale than the clipped [-2, 10]
+        # delta_u channels; left un-normalized it made mse_loss weight the
+        # 4 output channels very unevenly. See core/utils/target_norm.py.
         if raw_y.shape[0] > 1:
             out_y[1] = np.maximum(raw_y[1], 0.0)
 
@@ -283,9 +287,11 @@ class NpyDataset(Dataset):
             out_y[2, has_data] = (mag_u_roof[has_data] - u_ref[has_data]) / (u_ref[has_data] + 1e-6)
             out_y[2] = np.clip(out_y[2], -2.0, 10.0)
 
-        # Ch3: k_roof (TKE roof) — keep raw, ensure non-negative
+        # Ch3: k_roof (TKE roof) — clamp non-negative, then z-score normalize
         if raw_y.shape[0] > 3:
             out_y[3] = np.maximum(raw_y[3], 0.0)
+
+        normalize_k_channels(out_y)
 
         return out_x, out_y
 
