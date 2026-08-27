@@ -64,17 +64,27 @@ for i, name in enumerate(ch_names):
     print(f"  ch{i} {name:15s}:  min={c.min():7.3f}  max={c.max():7.3f}  mean={c.mean():7.3f}  std={c.std():.3f}")
 
 print(f"\n=== Y (Training Target) ===")
-print(f"  min  = {y_sample.min():.4f}")
-print(f"  max  = {y_sample.max():.4f}")
-print(f"  mean = {y_sample.mean():.4f}")
-print(f"  std  = {y_sample.std():.4f}")
+y_ch_names = ["U (delta_u)", "k (TKE)", "U_roof (delta_u_roof)", "k_roof (TKE_roof)"]
+if y_sample.ndim == 4:
+    num_y_ch = y_sample.shape[1]
+    print(f"  Found {num_y_ch} target channel(s) in Y.npy:")
+    for c in range(num_y_ch):
+        c_name = y_ch_names[c] if c < len(y_ch_names) else f"Channel {c}"
+        vals = y_sample[:, c]
+        print(f"    ch{c} {c_name:22s}: min={vals.min():7.4f}  max={vals.max():7.4f}  mean={vals.mean():7.4f}  std={vals.std():.4f}")
+else:
+    print(f"  min  = {y_sample.min():.4f}")
+    print(f"  max  = {y_sample.max():.4f}")
+    print(f"  mean = {y_sample.mean():.4f}")
+    print(f"  std  = {y_sample.std():.4f}")
 
-y_flat = y_sample.flatten()
+y_ch0 = y_sample[:, 0] if y_sample.ndim == 4 else y_sample
+y_flat = y_ch0.flatten()
 y_mean = y_flat.mean()
 y_min  = y_flat.min()
 y_max  = y_flat.max()
 
-print(f"\n=== FORMAT DIAGNOSIS ===")
+print(f"\n=== FORMAT DIAGNOSIS (Target Ch0: U) ===")
 if y_min >= 0 and y_max > 1.5:
     print("  *** PROBLEM: Y looks like raw mag_U (range 0 to 2+). ***")
     print("  Expected: delta_u (range ~-1 to +5, mean near 0).")
@@ -86,12 +96,13 @@ else:
     print("  Expected delta_u: mean ~0.0, min ~-1.0, max ~5.0")
 
 # Wake distribution
+sample_n = len(idx)
 near_zero   = float((np.abs(y_flat) < 0.05).mean())
 mild_wake   = float((y_flat < -0.2).mean())
 deep_wake   = float((y_flat < -0.5).mean())
 accel       = float((y_flat > 0.5).mean())
 
-print(f"\n=== WAKE DISTRIBUTION (from {SAMPLE_N} samples) ===")
+print(f"\n=== WAKE DISTRIBUTION (from {sample_n} samples) ===")
 print(f"  Near-zero  |delta| < 0.05:  {near_zero:.1%}  <- drives model to predict 0")
 print(f"  Mild wake  delta   < -0.20: {mild_wake:.1%}")
 print(f"  Deep wake  delta   < -0.50: {deep_wake:.1%}")
