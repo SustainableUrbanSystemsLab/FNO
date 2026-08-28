@@ -128,8 +128,20 @@ def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
     
     spectral_loss = torch.tensor(0.0, device=y_pred.device)
     if spectral_weight > 0:
-        pred_fft = torch.fft.rfft2(y_pred, norm='ortho')
-        tgt_fft = torch.fft.rfft2(y_target, norm='ortho')
+        # [CHANNEL SELECTIVE] Focus only on primary wind speed channel,
+        # matching wake_loss/peak_loss above. This term was designed around
+        # wake-boundary sharpness of the wind field specifically (see
+        # docs/fno_wake_prediction_fixes.md) and is a raw, unmasked FFT over
+        # whatever channels it's given -- once Y grew to 4 channels this
+        # started including the unbounded k/k_roof channels, whose rare
+        # outliers blow up the FFT and destabilize training. See
+        # core/utils/target_norm.py for the corresponding clip fix.
+        spec_pred, spec_target = y_pred, y_target
+        if spec_pred.shape[1] > 1:
+            spec_pred = spec_pred[:, 0:1]
+            spec_target = spec_target[:, 0:1]
+        pred_fft = torch.fft.rfft2(spec_pred, norm='ortho')
+        tgt_fft = torch.fft.rfft2(spec_target, norm='ortho')
         spectral_loss = torch.mean(torch.abs(pred_fft - tgt_fft) ** 2)
     
     peak_loss = torch.tensor(0.0, device=y_pred.device)

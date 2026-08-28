@@ -15,6 +15,8 @@ k, building footprint for k_roof) -- see the analysis in experiments_log.md /
 the "adding 3 new y values" investigation.
 """
 
+import numpy as np
+
 K_MEAN = 0.036822
 K_STD = 0.030528
 K_ROOF_MEAN = 0.052280
@@ -25,16 +27,25 @@ STATS_SOURCE = (
     "k_roof: n=78,849,623 valid px where bldg_h>0)"
 )
 
+# Same clip range as delta_u (NpyDataset._remap_to_fno). K_STD is tiny
+# (~0.03) relative to k's heavy right tail (real turbulence spikes near
+# building corners), so a handful of raw outliers z-score into huge values
+# (observed up to ~26 in a training run) that blew up the unmasked FFT term
+# in sensor_weighted_mse's spectral_loss and destabilized training for every
+# architecture except PINN (which has no spectral term). Clip post-normalize
+# the same way delta_u is clipped, for the same reason.
+K_CLIP_MIN, K_CLIP_MAX = -2.0, 10.0
+
 
 def normalize_k_channels(y):
-    """In-place z-score normalization of the k / k_roof channels of a
-    (..., C, H, W) numpy target array. No-op for channels that don't exist
+    """In-place z-score normalization (+ clip) of the k / k_roof channels of
+    a (..., C, H, W) numpy target array. No-op for channels that don't exist
     (C <= 1) or that aren't k-like (C == 2 or 3 without a roof pair handled
     by the caller -- only indices 1 and 3 are touched)."""
     if y.shape[-3] > 1:
-        y[..., 1, :, :] = (y[..., 1, :, :] - K_MEAN) / K_STD
+        y[..., 1, :, :] = np.clip((y[..., 1, :, :] - K_MEAN) / K_STD, K_CLIP_MIN, K_CLIP_MAX)
     if y.shape[-3] > 3:
-        y[..., 3, :, :] = (y[..., 3, :, :] - K_ROOF_MEAN) / K_ROOF_STD
+        y[..., 3, :, :] = np.clip((y[..., 3, :, :] - K_ROOF_MEAN) / K_ROOF_STD, K_CLIP_MIN, K_CLIP_MAX)
     return y
 
 
