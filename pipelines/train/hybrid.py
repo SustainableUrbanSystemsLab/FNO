@@ -58,6 +58,7 @@ def main():
         SPEC_W = config.get('loss', {}).get('spectral_weight', 0.001)
         PEAK_W = config.get('loss', {}).get('peak_weight', 0.5)
         WAKE_W = config.get('loss', {}).get('wake_weight', 1.0)
+        CHANNEL_WEIGHTS = config.get('loss', {}).get('channel_weights', None)
         MODEL_OUT = config.get('paths', {}).get('model_checkpoint', 'hybrid_fno_weights.pth')
         _nw = config.get('performance', {}).get('num_workers', 0)
         if _nw > 0:
@@ -133,7 +134,8 @@ def main():
                     spectral_weight=w['spectral_weight'],
                     peak_weight=w['peak_weight'],
                     wake_weight=w['wake_weight'],
-                    wake_threshold=-0.5
+                    wake_threshold=-0.5,
+                    channel_weights=CHANNEL_WEIGHTS
                 )
                 opt.zero_grad(); loss.backward(); opt.step()
                 r_l += loss.item() * xb.shape[0]
@@ -145,7 +147,7 @@ def main():
                     xb, yb = xb.to(device), yb.to(device)
                     v_l = sensor_weighted_mse(
                         model(xb), yb, sensor_mask=build_channel_mask(xb, out_ch),
-                        **get_loss_weights(ep), wake_threshold=-0.5
+                        **get_loss_weights(ep), wake_threshold=-0.5, channel_weights=CHANNEL_WEIGHTS
                     )
                     v_l_acc += v_l.item() * xb.shape[0]
 

@@ -105,17 +105,48 @@ def compute_peak_loss(y_pred, y_target, sensor_mask, high_threshold=0.5, low_thr
     extreme_error = ((y_pred - y_target) ** 2) * extreme_mask * sensor_mask
     return extreme_error.sum() / (extreme_mask.sum() + 1e-8)
 
+def _per_channel_weighted(sq_err, mask, channel_weights):
+    """sq_err, mask: (B, C, H, W). Returns the weighted average of each
+    channel's OWN valid-region mean squared error.
+
+    Why this exists: summing squared error across channels and dividing by
+    one combined pixel count (the old behavior) makes each channel's share
+    of the loss proportional to how many valid pixels it happens to have.
+    With build_channel_mask's per-channel masking, the roof channels
+    (U_roof, k_roof) are valid on ~4% of pixels vs ~79% for the pedestrian
+    channels (U, k) -- so under the old combined-sum approach, roof
+    channels were diluted down to ~2.35% each of the gradient signal vs
+    ~47.65% each for U/k, regardless of channel_weights. Normalizing each
+    channel by its own valid-pixel count first decouples "how much this
+    channel matters" (channel_weights) from "how many valid pixels this
+    channel happens to have."
+    """
+    C = sq_err.shape[1]
+    if channel_weights is None:
+        channel_weights = sq_err.new_ones(C)
+    else:
+        channel_weights = torch.as_tensor(channel_weights[:C], device=sq_err.device, dtype=sq_err.dtype)
+    per_channel = (sq_err * mask).sum(dim=(0, 2, 3)) / (mask.sum(dim=(0, 2, 3)) + 1e-8)
+    return (per_channel * channel_weights).sum() / (channel_weights.sum() + 1e-8)
+
+
 def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
-                        grad_weight=0.0, spectral_weight=0.0, 
+                        grad_weight=0.0, spectral_weight=0.0,
                         peak_weight=0.0, wake_weight=0.0,
-                        wake_threshold=-0.3,
+                        wake_threshold=-0.3, channel_weights=None,
                         return_components=False):
-    """Multi-component loss for FNO training."""
+    """Multi-component loss for FNO training.
+
+    channel_weights: optional per-output-channel importance, e.g.
+    [1.0, 0.5, 0.5, 0.25] for [U, k, U_roof, k_roof]. See
+    _per_channel_weighted for why this is applied per-channel-normalized
+    rather than as a simple multiplier on the old combined-sum MSE.
+    """
     if sensor_mask is None:
         sensor_mask = torch.ones_like(y_pred)
-    
-    mse_loss = (sensor_mask * (y_pred - y_target) ** 2).sum() / (sensor_mask.sum() + 1e-8)
-    
+
+    mse_loss = _per_channel_weighted((y_pred - y_target) ** 2, sensor_mask, channel_weights)
+
     gradient_loss = torch.tensor(0.0, device=y_pred.device)
     if grad_weight > 0:
         p_dx = y_pred[:, :, :, 1:] - y_pred[:, :, :, :-1]
@@ -124,7 +155,8 @@ def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
         t_dy = y_target[:, :, 1:, :] - y_target[:, :, :-1, :]
         m_dx = sensor_mask[:, :, :, 1:]
         m_dy = sensor_mask[:, :, 1:, :]
-        gradient_loss = ((p_dx - t_dx)**2 * m_dx).mean() + ((p_dy - t_dy)**2 * m_dy).mean()
+        gradient_loss = (_per_channel_weighted((p_dx - t_dx) ** 2, m_dx, channel_weights)
+                          + _per_channel_weighted((p_dy - t_dy) ** 2, m_dy, channel_weights))
     
     spectral_loss = torch.tensor(0.0, device=y_pred.device)
     if spectral_weight > 0:

@@ -22,6 +22,8 @@ import torch
 import torch.nn as nn
 from neuralop.models import FNO
 
+from core.models.fno2d import _per_channel_weighted
+
 
 class SpatialAttention(nn.Module):
     """Spatial attention to focus on wakes and acceleration zones."""
@@ -203,7 +205,7 @@ def wake_physics_loss(pred, target, sdf, wake_threshold=-0.2, sdf_threshold=0.05
 def pinn_loss(pred, target, x_input, sensor_mask=None,
               grad_weight=2.0, continuity_weight=0.1,
               momentum_weight=0.05, wake_weight=1.0,
-              peak_weight=0.5):
+              peak_weight=0.5, channel_weights=None):
     """
     Combined PINN-FNO loss:
       L = MSE + grad_weight * L_grad
@@ -213,18 +215,20 @@ def pinn_loss(pred, target, x_input, sensor_mask=None,
             + peak_weight * L_peak
 
     Args:
-        pred:           (B, 1, H, W) model output (delta_u)
-        target:         (B, 1, H, W) ground truth (delta_u)
+        pred:           (B, C, H, W) model output (delta_u, + k/roof channels if C>1)
+        target:         (B, C, H, W) ground truth
         x_input:        (B, 8, H, W) the full input tensor (for SDF, dir extraction)
-        sensor_mask:    (B, 1, H, W) per-pixel weighting (high near buildings)
+        sensor_mask:    (B, C, H, W) per-channel/per-pixel weighting
+        channel_weights: optional per-channel importance, e.g. [1.0, 0.5, 0.5, 0.25]
+                         for [U, k, U_roof, k_roof]. See fno2d._per_channel_weighted.
     Returns:
         total_loss (scalar), components (dict)
     """
     if sensor_mask is None:
         sensor_mask = torch.ones_like(pred)
 
-    # 1. Weighted MSE
-    mse = (sensor_mask * (pred - target) ** 2).sum() / (sensor_mask.sum() + 1e-8)
+    # 1. Weighted MSE (per-channel-normalized, see fno2d._per_channel_weighted)
+    mse = _per_channel_weighted((pred - target) ** 2, sensor_mask, channel_weights)
 
     # 2. Gradient fidelity (sharp boundaries)
     p_dx = pred[:, :, :, 1:] - pred[:, :, :, :-1]
@@ -233,7 +237,8 @@ def pinn_loss(pred, target, x_input, sensor_mask=None,
     t_dy = target[:, :, 1:, :] - target[:, :, :-1, :]
     m_dx = sensor_mask[:, :, :, 1:]
     m_dy = sensor_mask[:, :, 1:, :]
-    grad = ((p_dx - t_dx) ** 2 * m_dx).mean() + ((p_dy - t_dy) ** 2 * m_dy).mean()
+    grad = (_per_channel_weighted((p_dx - t_dx) ** 2, m_dx, channel_weights)
+            + _per_channel_weighted((p_dy - t_dy) ** 2, m_dy, channel_weights))
 
     # 3. Physics: Continuity (∇·u ≈ 0)
     cont = continuity_loss(pred)

@@ -102,6 +102,7 @@ def main():
         WAKE_W   = config.get('loss', {}).get('wake_weight', 1.0)
         GRAD_W   = config.get('loss', {}).get('gradient_weight', 1.5)
         SPEC_W   = config.get('loss', {}).get('spectral_weight', 0.001)
+        CHANNEL_WEIGHTS = config.get('loss', {}).get('channel_weights', None)
 
         def get_loss_weights(epoch):
             t = min(1.0, epoch / 30.0) 
@@ -176,7 +177,7 @@ def main():
                     pred, yb, sensor_mask=mb,
                     grad_weight=w['grad_weight'], spectral_weight=w['spectral_weight'],
                     peak_weight=w['peak_weight'], wake_weight=w['wake_weight'],
-                    wake_threshold=-0.5, return_components=True
+                    wake_threshold=-0.5, channel_weights=CHANNEL_WEIGHTS, return_components=True
                 )
                 opt.zero_grad(); loss.backward(); opt.step()
                 bs = xb.shape[0]
@@ -194,7 +195,8 @@ def main():
                 for xb, yb in val_loader:
                     xb, yb = xb.to(device), yb.to(device)
                     mb = build_channel_mask(xb, out_ch)
-                    v_l = sensor_weighted_mse(model(xb), yb, sensor_mask=mb, **get_loss_weights(epoch), wake_threshold=-0.5)
+                    v_l = sensor_weighted_mse(model(xb), yb, sensor_mask=mb, **get_loss_weights(epoch),
+                                               wake_threshold=-0.5, channel_weights=CHANNEL_WEIGHTS)
                     v_loss_acc += v_l.item() * xb.shape[0]
 
             if is_distributed:

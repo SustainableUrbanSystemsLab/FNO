@@ -71,6 +71,7 @@ SPECTRAL_WEIGHT = config.get('loss', {}).get('spectral_weight', 0.001)
 PEAK_WEIGHT     = config.get('loss', {}).get('peak_weight', 0.5)
 WAKE_WEIGHT     = config.get('loss', {}).get('wake_weight', 1.0)
 WARMUP_EPOCHS   = config.get('loss', {}).get('warmup_epochs', 10)
+CHANNEL_WEIGHTS = config.get('loss', {}).get('channel_weights', None)
 
 def get_loss_weights(epoch):
     # Linearly ramp physics weights from 0 to their max over WARMUP_EPOCHS.
@@ -580,6 +581,7 @@ def main():
                                                 spectral_weight=w['spectral_weight'],
                                                 peak_weight=w['peak_weight'],
                                                 wake_weight=w['wake_weight'],
+                                                channel_weights=CHANNEL_WEIGHTS,
                                                 return_components=True)
             opt.zero_grad()
             loss.backward()
@@ -611,7 +613,8 @@ def main():
                                             grad_weight=w['grad_weight'],
                                             spectral_weight=w['spectral_weight'],
                                             peak_weight=w['peak_weight'],
-                                            wake_weight=w['wake_weight'])
+                                            wake_weight=w['wake_weight'],
+                                            channel_weights=CHANNEL_WEIGHTS)
                 val_running += float(v_loss.item()) * xb.shape[0]
 
         scheduler.step()

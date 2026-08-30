@@ -39,6 +39,14 @@ peak_weight       = 0.5
 wake_weight       = 1.0
 warmup_epochs     = 10
 
+# Per-output-channel importance for the 4-channel target [U, k, U_roof, k_roof].
+# Applied per-channel-normalized (each channel weighted by its own valid-pixel
+# MSE, not diluted by how many valid pixels it happens to have) -- see
+# core/models/fno2d.py::_per_channel_weighted. U is the primary evaluated
+# channel; k and U_roof are secondary; k_roof is the least critical.
+# Only used when out_channels > 1 (single-channel legacy training ignores this).
+channel_weights   = [1.0, 0.5, 0.5, 0.25]
+
 # PINN-specific physics constraints
 continuity_weight = 1.0    # Increased to enforce ∇·u ≈ 0
 momentum_weight   = 0.1 

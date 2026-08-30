@@ -70,6 +70,7 @@ def main():
         MOM_W  = LC.get('momentum_weight', 0.01)
         PEAK_W = LC.get('peak_weight', 0.5)
         WAKE_W = LC.get('wake_weight', 1.0)
+        CHANNEL_WEIGHTS = LC.get('channel_weights', None)
 
         # 2. Data
         DATA_FOLDER = config.get('paths', {}).get('data_folder_ice', 'train_csv')
@@ -124,7 +125,7 @@ def main():
                 xb, yb = xb.to(device), yb.to(device)
                 mb = build_channel_mask(xb, out_ch)
                 pred = model(xb)
-                loss, _ = pinn_loss(pred, yb, x_input=xb, sensor_mask=mb, grad_weight=GRAD_W, continuity_weight=CONT_W, momentum_weight=MOM_W, wake_weight=WAKE_W, peak_weight=PEAK_W)
+                loss, _ = pinn_loss(pred, yb, x_input=xb, sensor_mask=mb, grad_weight=GRAD_W, continuity_weight=CONT_W, momentum_weight=MOM_W, wake_weight=WAKE_W, peak_weight=PEAK_W, channel_weights=CHANNEL_WEIGHTS)
                 opt.zero_grad(); loss.backward(); opt.step()
                 r_l += loss.item() * xb.shape[0]
 
@@ -134,7 +135,7 @@ def main():
                 for xb, yb in v_loader:
                     xb, yb = xb.to(device), yb.to(device)
                     mb = build_channel_mask(xb, out_ch)
-                    v_l, _ = pinn_loss(model(xb), yb, x_input=xb, sensor_mask=mb, grad_weight=GRAD_W, continuity_weight=CONT_W, momentum_weight=MOM_W, wake_weight=WAKE_W, peak_weight=PEAK_W)
+                    v_l, _ = pinn_loss(model(xb), yb, x_input=xb, sensor_mask=mb, grad_weight=GRAD_W, continuity_weight=CONT_W, momentum_weight=MOM_W, wake_weight=WAKE_W, peak_weight=PEAK_W, channel_weights=CHANNEL_WEIGHTS)
                     v_l_acc += v_l.item() * xb.shape[0]
 
             if is_distributed:
