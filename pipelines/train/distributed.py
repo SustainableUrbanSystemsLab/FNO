@@ -92,7 +92,21 @@ if _configured_workers > 0:
 elif sys.platform == 'win32':
     NUM_WORKERS = min(8, max(1, cpu_count() // 2))
 else:
-    NUM_WORKERS = max(1, cpu_count() // 2)
+    NUM_WORKERS = min(8, max(1, cpu_count() // 2))
+
+def loader_kwargs(num_workers):
+    """Shared DataLoader tuning. Only pass worker-related kwargs when we
+    actually have workers (torch rejects prefetch_factor/persistent_workers
+    with num_workers=0). Hard-cap the worker count: on a 192-core node an
+    unguarded cpu_count()//2 fallback spawns ~96 processes per loader, which
+    oversubscribes the SLURM cpu allocation badly."""
+    num_workers = max(0, min(int(num_workers or 0), 16))
+    kw = dict(num_workers=num_workers, pin_memory=torch.cuda.is_available())
+    if num_workers > 0:
+        kw['persistent_workers'] = True
+        kw['prefetch_factor'] = 4
+    return kw
+
 
 # ============ Distributed Setup ============
 def setup_distributed():
@@ -218,10 +232,33 @@ class NpyDataset(Dataset):
         # Auto-detect format: if Ch0 range >> 1, it's Transformer format (raw coords)
         ch0_max = np.abs(self.X[0, 0]).max()
         self.needs_remap = ch0_max > 10.0  # SDF/200 would be 0-1; raw X_coords is ~500
+
+        # --- Preprocessed FNO-format cache (see tools/preprocess_cache.py) ---
+        # The Transformer->FNO remap in _remap_to_fno is deterministic and
+        # per-sample, so it can be precomputed once. Caching it as fp16 also
+        # halves the bytes read per epoch off the (network) filesystem, which
+        # is the dominant cost for the 65 GB X.npy. If both cache files exist
+        # next to the source X.npy/Y.npy and match its sample count, use them.
+        if self.needs_remap:
+            cache_dir = os.path.dirname(os.path.abspath(X_path))
+            cx = os.path.join(cache_dir, 'X_fno_fp16.npy')
+            cy = os.path.join(cache_dir, 'Y_fno_fp16.npy')
+            if os.path.exists(cx) and os.path.exists(cy):
+                cxa = np.load(cx, mmap_mode='r')
+                cya = np.load(cy, mmap_mode='r')
+                if cxa.shape[0] == self.X.shape[0] and cya.shape[0] == self.Y.shape[0]:
+                    self.X, self.Y = cxa, cya
+                    self.needs_remap = False
+                    print(f"[NpyDataset] Using preprocessed FNO-format fp16 cache "
+                          f"({os.path.basename(cx)} / {os.path.basename(cy)}).")
+                else:
+                    print("[NpyDataset] Found FNO cache but shape mismatch -- ignoring, "
+                          "will remap on-the-fly.")
+
         if self.needs_remap:
             print("[NpyDataset] Detected Transformer-format data. Will remap to FNO format on-the-fly.")
         else:
-            print("[NpyDataset] Data appears to already be in FNO format (Ch0 range < 10).")
+            print("[NpyDataset] Data in FNO format (no on-the-fly remap).")
 
     def __len__(self):
         return self.X.shape[0]
@@ -417,14 +454,15 @@ def main():
         print("=" * 50)
 
     # Create DataLoaders
+    _lk = loader_kwargs(NUM_WORKERS)
     if is_distributed:
         train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
         val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False)
-        train_loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, num_workers=NUM_WORKERS)
-        val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, num_workers=NUM_WORKERS)
+        train_loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, **_lk)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, **_lk)
     else:
-        train_loader = DataLoader(train_dataset, batch_size=BATCH, shuffle=True, num_workers=NUM_WORKERS)
-        val_loader = DataLoader(val_dataset, batch_size=BATCH, shuffle=False, num_workers=NUM_WORKERS)
+        train_loader = DataLoader(train_dataset, batch_size=BATCH, shuffle=True, **_lk)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH, shuffle=False, **_lk)
 
     if is_main_process(rank):
         print("CREATING MODEL...")
@@ -443,7 +481,12 @@ def main():
         print("=" * 50)
 
     opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)  # Smooth LR decay
+    # LR schedule keyed to the *stable* selection metric (pure per-channel MSE,
+    # see val loop below) rather than a fixed epoch horizon -- runs get
+    # truncated by walltime well before EPOCHS, so a cosine over T_max=EPOCHS
+    # never actually decays. Plateau adapts to real progress instead.
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        opt, mode='min', factor=0.5, patience=8, min_lr=1e-6)
 
     # Checkpoint resume logic (auto-detect)
     start_epoch = 1
@@ -482,10 +525,11 @@ def main():
             if is_main_process(rank):
                 print(f"  [INFO] Learning rate updated to {LR}")
 
-            # 2. Reset Scheduler (to respect new epochs and LR)
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
+            # 2. Reset Scheduler
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                opt, mode='min', factor=0.5, patience=8, min_lr=1e-6)
             if is_main_process(rank):
-                print(f"  [INFO] Scheduler reset with T_max={EPOCHS}")
+                print("  [INFO] Plateau scheduler reset")
 
 
         if is_main_process(rank):
@@ -600,7 +644,12 @@ def main():
 
         # --- Validation Pass ---
         model.eval()
-        val_running = 0.0
+        val_running = 0.0       # ramped/composite val loss (for the curve)
+        val_sel_running = 0.0   # STABLE selection metric: pure per-channel MSE,
+                                # no epoch-dependent aux weights -> comparable
+                                # across epochs, so best-checkpoint / early-stop
+                                # / LR-plateau all key off this instead of the
+                                # warmup-inflated composite.
         with torch.no_grad():
             for batch in val_loader:
                 xb, yb = batch
@@ -615,9 +664,11 @@ def main():
                                             peak_weight=w['peak_weight'],
                                             wake_weight=w['wake_weight'],
                                             channel_weights=CHANNEL_WEIGHTS)
+                v_sel = sensor_weighted_mse(pred, yb, sensor_mask=mb,
+                                            channel_weights=CHANNEL_WEIGHTS)
                 val_running += float(v_loss.item()) * xb.shape[0]
+                val_sel_running += float(v_sel.item()) * xb.shape[0]
 
-        scheduler.step()
         n_train = len(train_dataset)
         n_val = len(val_dataset)
 
@@ -628,7 +679,7 @@ def main():
             dist.barrier()
 
             # Aggregate all loss components across GPUs
-            running_tensor = torch.tensor([running, running_mse, running_grad, running_spec, running_peak, running_wake, val_running], device=device)
+            running_tensor = torch.tensor([running, running_mse, running_grad, running_spec, running_peak, running_wake, val_running, val_sel_running], device=device)
             dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
             running = running_tensor[0].item()
             running_mse = running_tensor[1].item()
@@ -637,6 +688,7 @@ def main():
             running_peak = running_tensor[4].item()
             running_wake = running_tensor[5].item()
             val_running = running_tensor[6].item()
+            val_sel_running = running_tensor[7].item()
 
         avg_loss = running / n_train
         avg_mse = running_mse / n_train
@@ -645,10 +697,15 @@ def main():
         avg_peak = running_peak / n_train
         avg_wake = running_wake / n_train
         avg_val_loss = val_running / n_val
+        avg_val_sel = val_sel_running / n_val
+
+        # Plateau LR schedule keyed to the stable metric (all ranks step with
+        # the same synchronized value).
+        scheduler.step(avg_val_sel)
 
         if is_main_process(rank):
             epoch_duration = time.time() - epoch_start
-            print(f"Epoch {epoch}/{target_end_epoch} loss {avg_loss:.6e} val_loss {avg_val_loss:.6e} ({epoch_duration:.2f}s)")
+            print(f"Epoch {epoch}/{target_end_epoch} loss {avg_loss:.6e} val_loss {avg_val_loss:.6e} val_sel {avg_val_sel:.6e} ({epoch_duration:.2f}s)")
 
             # Save resumable checkpoint every N epochs
             if epoch % CHECKPOINT_INTERVAL == 0:
@@ -671,8 +728,8 @@ def main():
                 train_losses.append(avg_loss)
                 val_losses.append(avg_val_loss)
 
-            if avg_val_loss < best_loss:
-                best_loss = avg_val_loss
+            if avg_val_sel < best_loss:
+                best_loss = avg_val_sel
                 patience_counter = 0
 
                 # Only Rank 0 saves the model
@@ -715,15 +772,16 @@ def main():
                 logger.log_epoch(epoch, {
                     'total_loss': avg_loss,
                     'val_loss': avg_val_loss,
+                    'val_sel_loss': avg_val_sel,
                     'mse_loss': avg_mse,
                     'gradient_loss': avg_grad,
                     'spectral_loss': avg_spec,
                     'peak_loss': avg_peak,
                     'wake_loss': avg_wake,
-                    'learning_rate': scheduler.get_last_lr()[0],
-                    'epoch_time': epoch_duration,
+                    'learning_rate': opt.param_groups[0]['lr'],
+                    'epoch_time_sec': epoch_duration,
                     'best_loss': best_loss,
-                    'patience': patience_counter,
+                    'patience_counter': patience_counter,
                 })
 
     if is_main_process(rank):

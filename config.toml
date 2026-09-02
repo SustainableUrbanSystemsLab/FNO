@@ -16,10 +16,10 @@ test_folder = 'test_csv'
 model_output = "fno_mag_weights.pth"
 
 [training]
-batch_size = 4
+batch_size = 8       # was 4 -- larger batch keeps the H200s fed; fits at 504^2 / modes 48 / width 64
 epochs = 200
 learning_rate = 1e-4
-patience = 50
+patience = 50        # early-stopping patience, on the stable val_sel_loss (pure per-channel MSE)
 checkpoint_interval = 10
 val_split = 0.1       # Fraction of data held out for validation (fixed seed=42)
 dropout = 0.1         # Increased to prevent overfitting
@@ -52,8 +52,10 @@ continuity_weight = 1.0    # Increased to enforce ∇·u ≈ 0
 momentum_weight   = 0.1 
 
 [performance]
-# Number of parallel workers for data loading (0 = auto-detect)
-num_workers = 4
+# Number of parallel workers for data loading (0 = auto-detect).
+# 8 per rank matches the SLURM --cpus-per-task allocation; the loader also
+# uses persistent workers + prefetch (see pipelines/train/distributed.py::loader_kwargs).
+num_workers = 8
 
 [pace]
 # PACE cluster configuration (required for job submission)
@@ -62,10 +64,10 @@ account = "gts-pkastner3"
 # Partition (leave empty for default)
 partition = ""
 # Walltime for the job (HH:MM:SS)
-walltime = "08:00:00"
+walltime = "16:00:00"   # every recent run hit the old 8h cap mid-training
 
 [ice]
 # ICE cluster configuration
 account = "gts-pkastner3"
 partition = "" # Optional, add if needed
-walltime = "08:00:00"
+walltime = "16:00:00"   # every recent run hit the old 8h cap mid-training

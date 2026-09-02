@@ -24,7 +24,7 @@ from core.models.fno2d import sensor_weighted_mse
 from core.models.geo_fno import GeoFNO
 from core.utils.training_logger import TrainingLogger
 from core.utils.config_loader import load_config
-from pipelines.train.distributed import NpyDataset, build_channel_mask
+from pipelines.train.distributed import NpyDataset, build_channel_mask, loader_kwargs
 
 def setup_distributed():
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
@@ -94,8 +94,9 @@ def main():
         elif sys.platform == 'win32':
             NUM_WORKERS = min(8, max(1, cpu_count() // 2))
         else:
-            NUM_WORKERS = max(1, cpu_count() // 2)
+            NUM_WORKERS = min(8, max(1, cpu_count() // 2))
         CHECKPOINT_INTERVAL = config.get('training', {}).get('checkpoint_interval', 10)
+        PATIENCE = config.get('training', {}).get('patience', 50)
 
         # Physics Weights (balanced with MSE to prevent zero-velocity field collapse)
         PEAK_W   = config.get('loss', {}).get('peak_weight', 0.5)
@@ -136,8 +137,9 @@ def main():
 
         train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank) if is_distributed else None
         val_sampler   = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False) if is_distributed else None
-        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=NUM_WORKERS)
-        val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, shuffle=False, num_workers=NUM_WORKERS)
+        _lk = loader_kwargs(NUM_WORKERS)
+        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=train_sampler, shuffle=(train_sampler is None), **_lk)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=val_sampler, shuffle=False, **_lk)
 
         # 4. Model
         sample_x, sample_y = train_dataset[0]
@@ -153,7 +155,11 @@ def main():
         if is_distributed: model = DDP(model, device_ids=[local_rank])
         
         opt = torch.optim.AdamW(model.parameters(), lr=LR)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
+        # Plateau schedule on the STABLE selection metric (pure per-channel MSE),
+        # not a fixed epoch horizon -- see the val loop below and the matching
+        # note in distributed.py.
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            opt, mode='min', factor=0.5, patience=8, min_lr=1e-6)
 
         if is_main(rank):
             _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -161,13 +167,15 @@ def main():
             logger.start_training({'batch': BATCH, 'lr': LR, 'modes': (MODES1, MODES2)}, model=model.module if is_distributed else model)
 
         best_loss = float('inf')
+        patience_counter = 0
         train_hist, val_hist = [], []
 
         for epoch in range(1, EPOCHS + 1):
+            epoch_start = time.time()
             if is_distributed: train_sampler.set_epoch(epoch)
             model.train()
             r_loss, r_mse, r_grad, r_spec, r_peak, r_wake = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-            
+
             for xb, yb in loader:
                 xb, yb = xb.to(device), yb.to(device)
                 mb = build_channel_mask(xb, out_ch)
@@ -190,36 +198,69 @@ def main():
 
             # Evaluation
             model.eval()
-            v_loss_acc = 0.0
+            v_loss_acc = 0.0       # composite (ramped) val loss, for the curve
+            v_sel_acc = 0.0        # stable selection metric: pure per-channel MSE
             with torch.no_grad():
                 for xb, yb in val_loader:
                     xb, yb = xb.to(device), yb.to(device)
                     mb = build_channel_mask(xb, out_ch)
-                    v_l = sensor_weighted_mse(model(xb), yb, sensor_mask=mb, **get_loss_weights(epoch),
+                    pred = model(xb)
+                    v_l = sensor_weighted_mse(pred, yb, sensor_mask=mb, **get_loss_weights(epoch),
                                                wake_threshold=-0.5, channel_weights=CHANNEL_WEIGHTS)
+                    v_sel = sensor_weighted_mse(pred, yb, sensor_mask=mb, channel_weights=CHANNEL_WEIGHTS)
                     v_loss_acc += v_l.item() * xb.shape[0]
+                    v_sel_acc += v_sel.item() * xb.shape[0]
 
             if is_distributed:
-                rt = torch.tensor([r_loss, r_mse, r_grad, r_spec, r_peak, r_wake, v_loss_acc], device=device)
+                rt = torch.tensor([r_loss, r_mse, r_grad, r_spec, r_peak, r_wake, v_loss_acc, v_sel_acc], device=device)
                 dist.all_reduce(rt, op=dist.ReduceOp.SUM)
-                r_loss, r_mse, r_grad, r_spec, r_peak, r_wake, v_loss_acc = rt.tolist()
+                r_loss, r_mse, r_grad, r_spec, r_peak, r_wake, v_loss_acc, v_sel_acc = rt.tolist()
 
-            scheduler.step()
-            avg_train, avg_val = r_loss/len(train_dataset), v_loss_acc/len(val_dataset)
-            
+            avg_train = r_loss / len(train_dataset)
+            avg_val = v_loss_acc / len(val_dataset)
+            avg_val_sel = v_sel_acc / len(val_dataset)
+            avg_mse = r_mse / len(train_dataset)
+            avg_grad = r_grad / len(train_dataset)
+            avg_spec = r_spec / len(train_dataset)
+            avg_peak = r_peak / len(train_dataset)
+            avg_wake = r_wake / len(train_dataset)
+
+            # All ranks step the scheduler / track patience with the same
+            # synchronized metric so they stop together.
+            scheduler.step(avg_val_sel)
+            improved = avg_val_sel < best_loss
+            if improved:
+                best_loss = avg_val_sel
+                patience_counter = 0
+            else:
+                patience_counter += 1
+            epoch_dt = time.time() - epoch_start
+
             if is_main(rank):
-                print(f"Epoch {epoch}/{EPOCHS} | Train: {avg_train:.4e} | Val: {avg_val:.4e}")
-                logger.log_epoch(epoch, {'total_loss': avg_train, 'val_loss': avg_val, 'best_loss': best_loss})
+                print(f"Epoch {epoch}/{EPOCHS} | Train: {avg_train:.4e} | Val: {avg_val:.4e} "
+                      f"| ValSel: {avg_val_sel:.4e} | LR: {opt.param_groups[0]['lr']:.2e} "
+                      f"| patience {patience_counter}/{PATIENCE} ({epoch_dt:.1f}s)")
                 train_hist.append(avg_train); val_hist.append(avg_val)
+                sd = model.module.state_dict() if is_distributed else model.state_dict()
 
-                if avg_val < best_loss:
-                    best_loss = avg_val
-                    sd = model.module.state_dict() if is_distributed else model.state_dict()
+                if improved:
                     torch.save({'model_state_dict': sd, 'history': {'train': train_hist, 'val': val_hist}, 'epoch': epoch}, MODEL_OUT)
-                    print(f"   * Best model saved (Val: {best_loss:.4e})")
+                    print(f"   * Best model saved (ValSel: {best_loss:.4e}, epoch {epoch})")
 
                 if epoch % CHECKPOINT_INTERVAL == 0:
                     torch.save(sd, f"epochs/geo_ep{epoch}.pth")
+
+                logger.log_epoch(epoch, {
+                    'total_loss': avg_train, 'val_loss': avg_val, 'val_sel_loss': avg_val_sel,
+                    'mse_loss': avg_mse, 'gradient_loss': avg_grad, 'spectral_loss': avg_spec,
+                    'peak_loss': avg_peak, 'wake_loss': avg_wake,
+                    'learning_rate': opt.param_groups[0]['lr'], 'epoch_time_sec': epoch_dt,
+                    'best_loss': best_loss, 'patience_counter': patience_counter,
+                })
+
+            if patience_counter >= PATIENCE:
+                if is_main(rank): print(f"Early stopping at epoch {epoch}")
+                break
 
     except Exception as e:
         print(f"ERROR [Rank {rank}]: {e}"); traceback.print_exc()

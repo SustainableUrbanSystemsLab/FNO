@@ -46,7 +46,7 @@ if [ -z "$ICE_ACCOUNT" ] && [ -f "$CONFIG_FILE" ]; then
 fi
 
 [ -z "$ICE_ACCOUNT"  ] && ICE_ACCOUNT="gts-pkastner3"
-[ -z "$ICE_WALLTIME" ] && ICE_WALLTIME="08:00:00"
+[ -z "$ICE_WALLTIME" ] && ICE_WALLTIME="16:00:00"
 
 GPU_TYPE_LOWER=$(echo "$GPU_TYPE" | tr '[:upper:]' '[:lower:]')
 case $GPU_TYPE_LOWER in

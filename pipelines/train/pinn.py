@@ -19,9 +19,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'
 
 # Local imports
 from core.models.pinn_fno import PINNFNO, pinn_loss
+from core.models.fno2d import sensor_weighted_mse
 from core.utils.training_logger import TrainingLogger
 from core.utils.config_loader import load_config
-from pipelines.train.distributed import NpyDataset, build_channel_mask
+from pipelines.train.distributed import NpyDataset, build_channel_mask, loader_kwargs
 
 def setup_distributed():
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
@@ -63,7 +64,7 @@ def main():
         elif sys.platform == 'win32':
             NUM_WORKERS = min(8, max(1, cpu_count() // 2))
         else:
-            NUM_WORKERS = max(1, cpu_count() // 2)
+            NUM_WORKERS = min(8, max(1, cpu_count() // 2))
         
         GRAD_W = LC.get('gradient_weight', 1.5)
         CONT_W = LC.get('continuity_weight', 0.05)
@@ -71,6 +72,8 @@ def main():
         PEAK_W = LC.get('peak_weight', 0.5)
         WAKE_W = LC.get('wake_weight', 1.0)
         CHANNEL_WEIGHTS = LC.get('channel_weights', None)
+        PATIENCE = TC.get('patience', 50)
+        CHECKPOINT_INTERVAL = TC.get('checkpoint_interval', 10)
 
         # 2. Data
         DATA_FOLDER = config.get('paths', {}).get('data_folder_ice', 'train_csv')
@@ -92,8 +95,9 @@ def main():
 
         t_samp = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank) if is_distributed else None
         v_samp = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False) if is_distributed else None
-        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=t_samp, shuffle=(t_samp is None), num_workers=NUM_WORKERS)
-        v_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=v_samp, shuffle=False, num_workers=NUM_WORKERS)
+        _lk = loader_kwargs(NUM_WORKERS)
+        loader = DataLoader(train_dataset, batch_size=BATCH, sampler=t_samp, shuffle=(t_samp is None), **_lk)
+        v_loader = DataLoader(val_dataset, batch_size=BATCH, sampler=v_samp, shuffle=False, **_lk)
 
         # 3. Model
         sample_x, sample_y = train_dataset[0]
@@ -107,54 +111,97 @@ def main():
         if is_distributed: model = DDP(model, device_ids=[local_rank])
         
         opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-5)
-        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
+        # PINN has no epoch-ramped loss weights, but we still key the LR
+        # schedule / early-stop / checkpointing to the same stable pure
+        # per-channel MSE used by the other pipelines so the four are
+        # directly comparable.
+        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            opt, mode='min', factor=0.5, patience=8, min_lr=1e-6)
 
         if is_main(rank):
+            os.makedirs("epochs", exist_ok=True)
             _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             logger = TrainingLogger(output_dir='training_logs', experiment_name=f"PINN_{_ts}")
-            logger.start_training({'batch': BATCH, 'lr': LR, 'modes': (MODES1, MODES2)}, model=model.module if is_distributed else model)
+            logger.start_training({'batch': BATCH, 'lr': LR, 'epochs': EPOCHS, 'modes1': MODES1,
+                                   'modes2': MODES2, 'width': WIDTH, 'n_layers': N_LAYERS,
+                                   'patience': PATIENCE},
+                                  model=model.module if is_distributed else model)
 
         best_v = float('inf')
+        patience_counter = 0
         t_hist, v_hist = [], []
 
         for ep in range(1, EPOCHS + 1):
+            epoch_start = time.time()
             if is_distributed: t_samp.set_epoch(ep)
             model.train()
-            r_l = 0.0
+            r_l = r_mse = r_grad = r_wake = r_peak = 0.0
             for xb, yb in loader:
                 xb, yb = xb.to(device), yb.to(device)
                 mb = build_channel_mask(xb, out_ch)
                 pred = model(xb)
-                loss, _ = pinn_loss(pred, yb, x_input=xb, sensor_mask=mb, grad_weight=GRAD_W, continuity_weight=CONT_W, momentum_weight=MOM_W, wake_weight=WAKE_W, peak_weight=PEAK_W, channel_weights=CHANNEL_WEIGHTS)
+                loss, comps = pinn_loss(pred, yb, x_input=xb, sensor_mask=mb, grad_weight=GRAD_W, continuity_weight=CONT_W, momentum_weight=MOM_W, wake_weight=WAKE_W, peak_weight=PEAK_W, channel_weights=CHANNEL_WEIGHTS)
                 opt.zero_grad(); loss.backward(); opt.step()
-                r_l += loss.item() * xb.shape[0]
+                bs = xb.shape[0]
+                r_l += loss.item() * bs
+                r_mse += comps['mse_loss'] * bs
+                r_grad += comps['gradient_loss'] * bs
+                r_wake += comps.get('wake_loss', 0.0) * bs
+                r_peak += comps.get('peak_loss', 0.0) * bs
 
             model.eval()
-            v_l_acc = 0.0
+            v_l_acc = 0.0     # composite PINN val loss, for the curve
+            v_sel_acc = 0.0   # stable selection metric: pure per-channel MSE
             with torch.no_grad():
                 for xb, yb in v_loader:
                     xb, yb = xb.to(device), yb.to(device)
                     mb = build_channel_mask(xb, out_ch)
-                    v_l, _ = pinn_loss(model(xb), yb, x_input=xb, sensor_mask=mb, grad_weight=GRAD_W, continuity_weight=CONT_W, momentum_weight=MOM_W, wake_weight=WAKE_W, peak_weight=PEAK_W, channel_weights=CHANNEL_WEIGHTS)
+                    pred = model(xb)
+                    v_l, _ = pinn_loss(pred, yb, x_input=xb, sensor_mask=mb, grad_weight=GRAD_W, continuity_weight=CONT_W, momentum_weight=MOM_W, wake_weight=WAKE_W, peak_weight=PEAK_W, channel_weights=CHANNEL_WEIGHTS)
+                    v_sel = sensor_weighted_mse(pred, yb, sensor_mask=mb, channel_weights=CHANNEL_WEIGHTS)
                     v_l_acc += v_l.item() * xb.shape[0]
+                    v_sel_acc += v_sel.item() * xb.shape[0]
 
             if is_distributed:
-                rt = torch.tensor([r_l, v_l_acc], device=device)
+                rt = torch.tensor([r_l, r_mse, r_grad, r_wake, r_peak, v_l_acc, v_sel_acc], device=device)
                 dist.all_reduce(rt, op=dist.ReduceOp.SUM)
-                r_l, v_l_acc = rt.tolist()
+                r_l, r_mse, r_grad, r_wake, r_peak, v_l_acc, v_sel_acc = rt.tolist()
 
-            sched.step()
-            avg_t, avg_v = r_l/len(train_dataset), v_l_acc/len(val_dataset)
+            n_tr, n_va = len(train_dataset), len(val_dataset)
+            avg_t, avg_v, avg_sel = r_l/n_tr, v_l_acc/n_va, v_sel_acc/n_va
+            avg_mse, avg_grad = r_mse/n_tr, r_grad/n_tr
+            avg_wake, avg_peak = r_wake/n_tr, r_peak/n_tr
+
+            sched.step(avg_sel)
+            improved = avg_sel < best_v
+            if improved:
+                best_v = avg_sel
+                patience_counter = 0
+            else:
+                patience_counter += 1
+            epoch_dt = time.time() - epoch_start
 
             if is_main(rank):
-                print(f"Ep {ep}/{EPOCHS} | T: {avg_t:.4e} | V: {avg_v:.4e}")
-                logger.log_epoch(ep, {'total_loss': avg_t, 'val_loss': avg_v, 'best_loss': best_v})
+                print(f"Ep {ep}/{EPOCHS} | T: {avg_t:.4e} | V: {avg_v:.4e} | ValSel: {avg_sel:.4e} "
+                      f"| LR: {opt.param_groups[0]['lr']:.2e} | patience {patience_counter}/{PATIENCE} ({epoch_dt:.1f}s)")
                 t_hist.append(avg_t); v_hist.append(avg_v)
-                if avg_v < best_v:
-                    best_v = avg_v
-                    sd = model.module.state_dict() if is_distributed else model.state_dict()
+                sd = model.module.state_dict() if is_distributed else model.state_dict()
+                if improved:
                     torch.save({'model_state_dict': sd, 'history': {'train': t_hist, 'val': v_hist}, 'epoch': ep}, MODEL_OUT)
-                    print(f"   * Saved best (Val: {best_v:.4e})")
+                    print(f"   * Saved best (ValSel: {best_v:.4e}, epoch {ep})")
+                if ep % CHECKPOINT_INTERVAL == 0:
+                    torch.save(sd, f"epochs/pinn_ep{ep}.pth")
+                logger.log_epoch(ep, {
+                    'total_loss': avg_t, 'val_loss': avg_v, 'val_sel_loss': avg_sel,
+                    'mse_loss': avg_mse, 'gradient_loss': avg_grad,
+                    'peak_loss': avg_peak, 'wake_loss': avg_wake,
+                    'learning_rate': opt.param_groups[0]['lr'], 'epoch_time_sec': epoch_dt,
+                    'best_loss': best_v, 'patience_counter': patience_counter,
+                })
+
+            if patience_counter >= PATIENCE:
+                if is_main(rank): print(f"Early stopping at epoch {ep}")
+                break
 
     except Exception as e:
         print(f"Error {rank}: {e}"); traceback.print_exc()
