@@ -334,8 +334,10 @@ def main():
         print(f"Training with {world_size} GPU(s)")
         print(f"Distributed: {is_distributed}")
 
-    # Cleanup old files (only on main process)
-    if is_main_process(rank):
+    # Cleanup old files (only on main process, and only when explicitly starting
+    # fresh -- otherwise this would delete the checkpoint the resume path below
+    # is about to load)
+    if is_main_process(rank) and args.fresh:
         if os.path.exists(MODEL_OUT):
             try: os.remove(MODEL_OUT)
             except: pass
