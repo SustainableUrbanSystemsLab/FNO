@@ -27,8 +27,10 @@ def load_config(config_file="config.toml"):
     else:
         print("Warning: config.toml not found, using defaults")
 
-    # 2. Merge config.local.toml on top (section by section)
-    local_path = os.path.join(root, "config.local.toml")
+    # 2. Merge config.local.toml on top (section by section); FNO_CONFIG_LOCAL
+    #    points at a different overrides file so concurrent variant runs sharing
+    #    one checkout do not have to overwrite each other's copy
+    local_path = os.environ.get("FNO_CONFIG_LOCAL") or os.path.join(root, "config.local.toml")
     if os.path.exists(local_path):
         with open(local_path, "rb") as f:
             local = tomllib.load(f)
@@ -37,6 +39,6 @@ def load_config(config_file="config.toml"):
                 config[section].update(values)
             else:
                 config[section] = values
-        print("Loaded local overrides from config.local.toml")
+        print(f"Loaded local overrides from {local_path}")
 
     return config
