@@ -609,8 +609,10 @@ def main():
                 xb = xb.to(device); yb = yb.to(device)
                 mb = build_channel_mask(xb, out_ch)
                 pred = model(xb)
-                # Use same loss weights as training for consistency in validation loss
-                w = get_loss_weights(epoch)
+                # Validation always uses the fully ramped weights so the val loss is
+                # comparable across epochs; with the training ramp, the epoch-1 loss
+                # was the smallest by construction and stayed "best" forever.
+                w = get_loss_weights(WARMUP_EPOCHS)
                 v_loss = sensor_weighted_mse(pred, yb, sensor_mask=mb,
                                             grad_weight=w['grad_weight'],
                                             spectral_weight=w['spectral_weight'],
