@@ -85,7 +85,7 @@ def compute_wake_loss(y_pred, y_target, sensor_mask, wake_threshold=-0.3):
 
     wake_mask = (y_target < wake_threshold).float()
     wake_error = ((y_pred - y_target) ** 2) * wake_mask * sensor_mask
-    return wake_error.sum() / (wake_mask.sum() + 1e-8)
+    return wake_error.sum() / ((wake_mask * sensor_mask).sum() + 1e-8)
 
 def compute_peak_loss(y_pred, y_target, sensor_mask, high_threshold=0.5, low_threshold=-0.5):
     """
@@ -103,7 +103,7 @@ def compute_peak_loss(y_pred, y_target, sensor_mask, high_threshold=0.5, low_thr
     low_mask = (y_target <= low_threshold).float()
     extreme_mask = torch.maximum(high_mask, low_mask)
     extreme_error = ((y_pred - y_target) ** 2) * extreme_mask * sensor_mask
-    return extreme_error.sum() / (extreme_mask.sum() + 1e-8)
+    return extreme_error.sum() / ((extreme_mask * sensor_mask).sum() + 1e-8)
 
 def _per_channel_weighted(sq_err, mask, channel_weights):
     """sq_err, mask: (B, C, H, W). Returns the weighted average of each
@@ -153,8 +153,12 @@ def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
         p_dy = y_pred[:, :, 1:, :] - y_pred[:, :, :-1, :]
         t_dx = y_target[:, :, :, 1:] - y_target[:, :, :, :-1]
         t_dy = y_target[:, :, 1:, :] - y_target[:, :, :-1, :]
-        m_dx = sensor_mask[:, :, :, 1:]
-        m_dy = sensor_mask[:, :, 1:, :]
+        # a finite difference is only meaningful when BOTH cells are valid; masking
+        # with one cell trains the net to draw the artificial step at building
+        # outlines and the domain rim (35 % of channel-0 gradient energy, ~73 % of
+        # the roof channels' -- measured on val)
+        m_dx = sensor_mask[:, :, :, 1:] * sensor_mask[:, :, :, :-1]
+        m_dy = sensor_mask[:, :, 1:, :] * sensor_mask[:, :, :-1, :]
         gradient_loss = (_per_channel_weighted((p_dx - t_dx) ** 2, m_dx, channel_weights)
                           + _per_channel_weighted((p_dy - t_dy) ** 2, m_dy, channel_weights))
     

@@ -172,7 +172,8 @@ def build_channel_mask(xb, out_ch):
         return torch.ones_like(xb[:, 0:1, :, :])
 
     bldg = (xb[:, 1:2, :, :] > 0).float()   # FNO Ch1 = Bldg_height / 50
-    open_ground = 1.0 - bldg
+    dom = (xb[:, 3:4, :, :] > 0).float()    # FNO Ch3 = U_over_Uref * 2: zero outside the circular CFD domain
+    open_ground = dom * (1.0 - bldg)        # the corners outside the circle carry no CFD data
     role_mask = {"pedestrian": open_ground, "roof": bldg}
 
     channels = [
@@ -603,12 +604,19 @@ def main():
         # --- Validation Pass ---
         model.eval()
         val_running = 0.0
+        val_se, val_n = 0.0, 0.0  # masked squared error of the scored quantity (U / U_ref)
         with torch.no_grad():
             for batch in val_loader:
                 xb, yb = batch
                 xb = xb.to(device); yb = yb.to(device)
                 mb = build_channel_mask(xb, out_ch)
                 pred = model(xb)
+                # benchmark-aligned selection metric: RMSE of U on open-ground domain
+                # cells; delta_u -> U/U_ref via the constant inlet ratio 0.26
+                m0 = (mb[:, 0] > 0) & (xb[:, 3] > 0)
+                err_u = 0.26 * (pred[:, 0] - yb[:, 0])
+                val_se += float((err_u[m0] ** 2).sum().item())
+                val_n += float(m0.sum().item())
                 # Validation always uses the fully ramped weights so the val loss is
                 # comparable across epochs; with the training ramp, the epoch-1 loss
                 # was the smallest by construction and stayed "best" forever.
@@ -632,7 +640,7 @@ def main():
             dist.barrier()
 
             # Aggregate all loss components across GPUs
-            running_tensor = torch.tensor([running, running_mse, running_grad, running_spec, running_peak, running_wake, val_running], device=device)
+            running_tensor = torch.tensor([running, running_mse, running_grad, running_spec, running_peak, running_wake, val_running, val_se, val_n], device=device)
             dist.all_reduce(running_tensor, op=dist.ReduceOp.SUM)
             running = running_tensor[0].item()
             running_mse = running_tensor[1].item()
@@ -641,6 +649,8 @@ def main():
             running_peak = running_tensor[4].item()
             running_wake = running_tensor[5].item()
             val_running = running_tensor[6].item()
+            val_se = running_tensor[7].item()
+            val_n = running_tensor[8].item()
 
         avg_loss = running / n_train
         avg_mse = running_mse / n_train
@@ -649,10 +659,11 @@ def main():
         avg_peak = running_peak / n_train
         avg_wake = running_wake / n_train
         avg_val_loss = val_running / n_val
+        avg_val_rmse_u = (val_se / max(val_n, 1.0)) ** 0.5
 
         if is_main_process(rank):
             epoch_duration = time.time() - epoch_start
-            print(f"Epoch {epoch}/{target_end_epoch} loss {avg_loss:.6e} val_loss {avg_val_loss:.6e} ({epoch_duration:.2f}s)")
+            print(f"Epoch {epoch}/{target_end_epoch} loss {avg_loss:.6e} val_loss {avg_val_loss:.6e} val_rmse_u {avg_val_rmse_u:.5f} ({epoch_duration:.2f}s)")
 
             # Save resumable checkpoint every N epochs
             if epoch % CHECKPOINT_INTERVAL == 0:
@@ -675,8 +686,10 @@ def main():
                 train_losses.append(avg_loss)
                 val_losses.append(avg_val_loss)
 
-            if avg_val_loss < best_loss:
-                best_loss = avg_val_loss
+            # select and early-stop on the scored quantity, not the 4-channel composite
+            # in which mag_U is only a few percent of the value
+            if avg_val_rmse_u < best_loss:
+                best_loss = avg_val_rmse_u
                 patience_counter = 0
 
                 # Only Rank 0 saves the model
@@ -719,6 +732,7 @@ def main():
                 logger.log_epoch(epoch, {
                     'total_loss': avg_loss,
                     'val_loss': avg_val_loss,
+                    'val_rmse_u': avg_val_rmse_u,
                     'mse_loss': avg_mse,
                     'gradient_loss': avg_grad,
                     'spectral_loss': avg_spec,
