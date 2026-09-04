@@ -202,7 +202,7 @@ class NpyDataset(Dataset):
       3. Building-centered coordinate computation
       4. Target conversion: mag_U -> delta_u = (mag - U_ref) / U_ref
     """
-    def __init__(self, X_path, Y_path, augment=False):
+    def __init__(self, X_path, Y_path, augment=False, subset=None):
         if not os.path.exists(X_path):
             raise FileNotFoundError(f"X.npy not found at {X_path}")
         if not os.path.exists(Y_path):
@@ -212,6 +212,11 @@ class NpyDataset(Dataset):
         self.X = np.load(X_path, mmap_mode='r')  # (N, 8, H, W)
         self.Y = np.load(Y_path, mmap_mode='r')  # (N, C_y, H, W)
         self.augment = augment
+        # data-scaling study: optional .npy of row indices into this split (benchmark/make_subsets.py)
+        self.idx = np.load(subset).astype(np.int64) if subset else None
+        if self.idx is not None:
+            assert self.idx.max() < self.X.shape[0], "subset indices outside the split"
+            print(f"[NpyDataset] subset {subset}: {self.idx.size} of {self.X.shape[0]} samples")
 
         assert self.X.shape[0] == self.Y.shape[0], \
             f"X/Y sample count mismatch: {self.X.shape[0]} vs {self.Y.shape[0]}"
@@ -225,7 +230,7 @@ class NpyDataset(Dataset):
             print("[NpyDataset] Data appears to already be in FNO format (Ch0 range < 10).")
 
     def __len__(self):
-        return self.X.shape[0]
+        return int(self.idx.size) if self.idx is not None else self.X.shape[0]
 
     def _remap_to_fno(self, raw_x, raw_y):
         """Convert Transformer channel layout + raw mag_U to FNO format."""
@@ -298,6 +303,8 @@ class NpyDataset(Dataset):
         return out_x, out_y
 
     def __getitem__(self, idx):
+        if self.idx is not None:
+            idx = int(self.idx[idx])
         x = np.array(self.X[idx], copy=True, dtype=np.float32)  # (8, H, W)
         y = np.array(self.Y[idx], copy=True, dtype=np.float32)  # (C_y, H, W)
 
@@ -326,7 +333,15 @@ def main():
     parser.add_argument('--config', type=str, default='config.toml', help='Config file to use')
     parser.add_argument('--val_dir', type=str, default=None, help='Directory containing validation X.npy and Y.npy')
     parser.add_argument('--reset-patience', action='store_true', help='Reset best_loss and patience (use when changing loss function)')
+    parser.add_argument('--train-subset', type=str, default=None, help='.npy of row indices into the train split (data-scaling study)')
+    parser.add_argument('--epochs', type=int, default=None, help='override training.epochs (scaled with the subset size to keep the step budget)')
+    parser.add_argument('--patience', type=int, default=None, help='override training.patience (epochs)')
     args = parser.parse_args()
+    global EPOCHS, PATIENCE
+    if args.epochs is not None:
+        EPOCHS = args.epochs
+    if args.patience is not None:
+        PATIENCE = args.patience
 
     local_rank, rank, world_size, is_distributed = setup_distributed()
     device = torch.device(f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
@@ -363,7 +378,7 @@ def main():
         print(f"  Y path: {y_path}")
 
     if args.val_dir and os.path.exists(os.path.join(args.val_dir, 'X.npy')):
-        train_dataset = NpyDataset(x_path, y_path, augment=True)
+        train_dataset = NpyDataset(x_path, y_path, augment=True, subset=args.train_subset)
         val_dataset = NpyDataset(os.path.join(args.val_dir, 'X.npy'), os.path.join(args.val_dir, 'Y.npy'), augment=False)
         total_samples = len(train_dataset) + len(val_dataset)
         train_dataset_full = train_dataset
