@@ -193,6 +193,61 @@ _RAW_U_REF     = 5
 _RAW_DIR_SIN   = 6
 _RAW_DIR_COS   = 7
 
+# ---- wind-aligned canonicalisation (benchmark 2026-09-05; mirrors benchmark/adapters/gridnets/data.py) ----
+# Conventions measured on the benchmark rasters: x increases along columns, y along rows, and the raw
+# channels (dir_sin, dir_cos) are the DOWNSTREAM unit wind vector in (x, y). Exact flips/transposes map
+# the eight directions onto two canonical ones, (0, 1) and (0.707, 0.707); predictions are mapped back.
+_CANON_XS = np.linspace(-485.0, 521.0, 504, dtype=np.float32)
+_CANON_YS = np.linspace(-514.5, 491.5, 504, dtype=np.float32)
+
+
+def canon_ops(sin, cos, eps=1e-3):
+    ops = []
+    if sin < -eps:
+        ops.append("fx"); sin = -sin
+    if cos < -eps:
+        ops.append("fy"); cos = -cos
+    if sin > cos + eps:
+        ops.append("t"); sin, cos = cos, sin
+    return ops, (sin, cos)
+
+
+def apply_ops(arr, ops):
+    """arr (..., H, W); ops in order. fx = flip columns, fy = flip rows, t = transpose."""
+    for op in ops:
+        if op == "fx":
+            arr = arr[..., :, ::-1]
+        elif op == "fy":
+            arr = arr[..., ::-1, :]
+        elif op == "t":
+            arr = np.swapaxes(arr, -1, -2)
+    return np.ascontiguousarray(arr)
+
+
+def invert_ops(arr, ops):
+    return apply_ops(arr, list(reversed(ops)))
+
+
+def raw_direction(x_raw):
+    inside = np.abs(x_raw[_RAW_DIR_SIN]) + np.abs(x_raw[_RAW_DIR_COS]) > 0.5
+    if not inside.any():
+        return 0.0, 1.0
+    return float(np.median(x_raw[_RAW_DIR_SIN][inside])), float(np.median(x_raw[_RAW_DIR_COS][inside]))
+
+
+def canonicalise_raw(x_raw, y_raw):
+    """Apply the canonical ops to a raw benchmark sample (8, H, W), (C, H, W); returns (x, y, ops)."""
+    sin, cos = raw_direction(x_raw)
+    ops, (s, c) = canon_ops(sin, cos)
+    if ops:
+        x_raw, y_raw = apply_ops(x_raw, ops), apply_ops(y_raw, ops)
+        inside = np.abs(x_raw[_RAW_DIR_SIN]) + np.abs(x_raw[_RAW_DIR_COS]) > 0.5
+        x_raw[_RAW_DIR_SIN][inside], x_raw[_RAW_DIR_COS][inside] = s, c
+        # coordinate channels are positional encodings: back to the canonical rasters
+        x_raw[_RAW_X_COORDS], x_raw[_RAW_Y_COORDS] = np.meshgrid(_CANON_XS, _CANON_YS)
+    return x_raw, y_raw, ops
+
+
 class NpyDataset(Dataset):
     """Dataset that loads Transformer-format X.npy/Y.npy and remaps to FNO format.
 
@@ -202,7 +257,7 @@ class NpyDataset(Dataset):
       3. Building-centered coordinate computation
       4. Target conversion: mag_U -> delta_u = (mag - U_ref) / U_ref
     """
-    def __init__(self, X_path, Y_path, augment=False, subset=None):
+    def __init__(self, X_path, Y_path, augment=False, subset=None, canon=False):
         if not os.path.exists(X_path):
             raise FileNotFoundError(f"X.npy not found at {X_path}")
         if not os.path.exists(Y_path):
@@ -212,6 +267,7 @@ class NpyDataset(Dataset):
         self.X = np.load(X_path, mmap_mode='r')  # (N, 8, H, W)
         self.Y = np.load(Y_path, mmap_mode='r')  # (N, C_y, H, W)
         self.augment = augment
+        self.canon = canon  # wind-aligned canonicalisation of the raw sample before the FNO remap
         # data-scaling study: optional .npy of row indices into this split (benchmark/make_subsets.py)
         self.idx = np.load(subset).astype(np.int64) if subset else None
         if self.idx is not None:
@@ -302,18 +358,39 @@ class NpyDataset(Dataset):
 
         return out_x, out_y
 
+    def ops_for(self, idx):
+        """Canonical ops of raw row idx (deterministic; what predict.py inverts). [] unless canon."""
+        if not self.canon:
+            return []
+        return canonicalise_raw(np.array(self.X[idx], copy=True, dtype=np.float32), np.zeros((1, 1, 1), np.float32))[2]
+
     def __getitem__(self, idx):
         if self.idx is not None:
             idx = int(self.idx[idx])
         x = np.array(self.X[idx], copy=True, dtype=np.float32)  # (8, H, W)
         y = np.array(self.Y[idx], copy=True, dtype=np.float32)  # (C_y, H, W)
 
+        canon_dir = None
+        if self.canon and self.needs_remap:
+            x, y, _ = canonicalise_raw(x, y)
+            canon_dir = raw_direction(x)
+
         # Remap from Transformer format to FNO format if needed
         if self.needs_remap:
             x, y = self._remap_to_fno(x, y)
 
+        if self.augment and canon_dir is not None:
+            # only the symmetry that keeps the canonical direction: mirror about the wind axis.
+            # FNO channel order after the remap: 4 = X_local, 5 = Y_local, 6 = dir_sin, 7 = dir_cos
+            s, c = canon_dir
+            if abs(s) < 1e-3 and np.random.random() > 0.5:      # wind along +y: flip columns
+                x = x[:, :, ::-1].copy(); y = y[:, :, ::-1].copy()
+                x[4] = -x[4]; x[6] = -x[6]
+            elif abs(s - c) < 1e-3 and np.random.random() > 0.5:  # diagonal wind: transpose
+                x = np.ascontiguousarray(np.swapaxes(x, 1, 2)); y = np.ascontiguousarray(np.swapaxes(y, 1, 2))
+                x = x[[0, 1, 2, 3, 5, 4, 7, 6]]
         # Optional augmentation: random horizontal flip
-        if self.augment and np.random.random() > 0.5:
+        elif self.augment and np.random.random() > 0.5:
             x = x[:, :, ::-1].copy()
             y = y[:, :, ::-1].copy()
             # Negate X_local (ch4) and dir_sin (ch6) for horizontal flip
@@ -336,6 +413,9 @@ def main():
     parser.add_argument('--train-subset', type=str, default=None, help='.npy of row indices into the train split (data-scaling study)')
     parser.add_argument('--epochs', type=int, default=None, help='override training.epochs (scaled with the subset size to keep the step budget)')
     parser.add_argument('--patience', type=int, default=None, help='override training.patience (epochs)')
+    parser.add_argument('--pad', type=int, default=0, help='FNO domain padding in cells (non-periodic domain); 0 = off')
+    parser.add_argument('--local-conv', action='store_true', help='add a depthwise 3x3 branch next to each spectral layer')
+    parser.add_argument('--canon', action='store_true', help='wind-aligned canonicalisation of the inputs (exact flips/transposes)')
     args = parser.parse_args()
     global EPOCHS, PATIENCE
     if args.epochs is not None:
@@ -378,8 +458,8 @@ def main():
         print(f"  Y path: {y_path}")
 
     if args.val_dir and os.path.exists(os.path.join(args.val_dir, 'X.npy')):
-        train_dataset = NpyDataset(x_path, y_path, augment=True, subset=args.train_subset)
-        val_dataset = NpyDataset(os.path.join(args.val_dir, 'X.npy'), os.path.join(args.val_dir, 'Y.npy'), augment=False)
+        train_dataset = NpyDataset(x_path, y_path, augment=True, subset=args.train_subset, canon=args.canon)
+        val_dataset = NpyDataset(os.path.join(args.val_dir, 'X.npy'), os.path.join(args.val_dir, 'Y.npy'), augment=False, canon=args.canon)
         total_samples = len(train_dataset) + len(val_dataset)
         train_dataset_full = train_dataset
         if is_main_process(rank): print(f"Using explicitly specified val_dir: {args.val_dir}", flush=True)
@@ -446,11 +526,11 @@ def main():
 
     if is_main_process(rank):
         print("CREATING MODEL...")
-        print(f"  FNO2d: modes=({MODES1},{MODES2}), width={WIDTH}, layers={N_LAYERS}")
+        print(f"  FNO2d: modes=({MODES1},{MODES2}), width={WIDTH}, layers={N_LAYERS}, pad={args.pad}, local_conv={args.local_conv}, canon={args.canon}")
 
     # Create model
     model = FNO2d(in_channels=in_ch, out_channels=out_ch, modes1=MODES1, modes2=MODES2,
-                  width=WIDTH, n_layers=N_LAYERS).to(device)
+                  width=WIDTH, n_layers=N_LAYERS, pad=args.pad, local_conv=args.local_conv).to(device)
 
     if is_distributed:
         model = DDP(model, device_ids=[local_rank])
@@ -721,7 +801,10 @@ def main():
                         'config': {
                             'modes': (MODES1, MODES2),
                             'width': WIDTH,
-                            'n_layers': N_LAYERS
+                            'n_layers': N_LAYERS,
+                            'pad': args.pad,
+                            'local_conv': args.local_conv,
+                            'canon': args.canon,
                         }
                     }
                     temp_out = MODEL_OUT + ".tmp"

@@ -38,9 +38,16 @@ class SpectralConv2d(nn.Module):
         return x
 
 class FNO2d(nn.Module):
-    def __init__(self, in_channels, out_channels, modes1=16, modes2=16, width=64, n_layers=4):
+    def __init__(self, in_channels, out_channels, modes1=16, modes2=16, width=64, n_layers=4, pad=0, local_conv=False):
+        """pad > 0 zero-pads the lifted field by `pad` cells on the right/bottom before the
+        Fourier layers and crops afterwards (domain padding for non-periodic problems, as in
+        Li et al. 2021; the CFD cylinder in a square frame is not periodic). local_conv adds a
+        depthwise 3x3 + pointwise branch next to each spectral layer so the network can
+        represent scales below the Fourier cut-off (48 of 252 modes = nothing under 21 m).
+        Both default off, so existing checkpoints load unchanged."""
         super().__init__()
         self.width = width
+        self.pad = int(pad)
         self.in_proj = nn.Conv2d(in_channels, width, kernel_size=1)
         self.fourier_layers = nn.ModuleList([
             nn.Sequential(
@@ -48,6 +55,10 @@ class FNO2d(nn.Module):
                 nn.Conv2d(width, width, kernel_size=1)
             ) for _ in range(n_layers)
         ])
+        self.local_layers = nn.ModuleList([
+            nn.Sequential(nn.Conv2d(width, width, kernel_size=3, padding=1, groups=width), nn.Conv2d(width, width, kernel_size=1))
+            for _ in range(n_layers)
+        ]) if local_conv else None
         self.activation = nn.GELU()
         self.out_proj = nn.Sequential(
             nn.Conv2d(width, width//2, kernel_size=1),
@@ -66,11 +77,18 @@ class FNO2d(nn.Module):
     def forward(self, x):
         # x: (B, C, H, W)
         x = self.in_proj(x)
-        for block in self.fourier_layers:
+        H, W = x.shape[-2:]
+        if self.pad:
+            x = torch.nn.functional.pad(x, (0, self.pad, 0, self.pad))
+        for i, block in enumerate(self.fourier_layers):
             spec = block[0](x)
             point = block[1](x)
             x = x + spec + point # Residual connection
+            if self.local_layers is not None:
+                x = x + self.local_layers[i](x)
             x = self.activation(x)
+        if self.pad:
+            x = x[..., :H, :W]
         out = self.out_proj(x)
         return out
 
