@@ -37,14 +37,69 @@ class SpectralConv2d(nn.Module):
         x = torch.fft.irfft2(out_ft, s=(x.size(-2), x.size(-1)))
         return x
 
+class UNetBranch(nn.Module):
+    """Small 2-level U-Net side branch for a U-FNO Fourier layer (Wen et al. 2022,
+    arXiv:2109.03697 "U-FNO -- An enhanced Fourier neural operator-based
+    deep-learning model for multiphase flow"). Runs parallel to the spectral
+    convolution inside one Fourier layer; its output is summed with the
+    spectral + pointwise branches (and the local-conv branch, if enabled)
+    before that layer's shared activation, restoring high-frequency content
+    the truncated Fourier modes cannot represent.
+
+    Recipe (fno_v4, docs/fno_gnn_improvements.md v4 candidate 2), exactly:
+      down1: conv3x3 stride2 (width -> branch_width), GELU
+      down2: conv3x3 stride2 (branch_width -> branch_width), GELU
+      up2:   conv-transpose3x3 stride2 (branch_width -> branch_width), + skip(down1 output)
+      up1:   conv-transpose3x3 stride2 (branch_width -> width), + skip(branch input)
+      -> output has `width` channels, no activation of its own (the caller's
+         shared GELU runs after every branch is summed).
+
+    branch_width defaults to width // 2 (the paper's choice); pass a smaller
+    value (e.g. width // 4) if this OOMs on the target GPU at the configured
+    batch size -- see FNO2d's `unet_width` argument.
+    """
+    def __init__(self, width, branch_width=None):
+        super().__init__()
+        self.branch_width = int(branch_width) if branch_width else max(width // 2, 1)
+        bw = self.branch_width
+        self.down1 = nn.Conv2d(width, bw, kernel_size=3, stride=2, padding=1)
+        self.down2 = nn.Conv2d(bw, bw, kernel_size=3, stride=2, padding=1)
+        self.up2 = nn.ConvTranspose2d(bw, bw, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.up1 = nn.ConvTranspose2d(bw, width, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.act = nn.GELU()
+
+    @staticmethod
+    def _match(t, ref):
+        """Crop/pad t (B, C, H', W') to ref's spatial size. A no-op whenever H, W are
+        divisible by 4 (true for every configured resolution: 504, 512, 504+32=536,
+        512+32=544 cells) -- kept only so an odd input size degrades gracefully
+        instead of crashing on a shape mismatch at the skip addition."""
+        h, w = ref.shape[-2:]
+        t = t[..., :h, :w]
+        if t.shape[-2] != h or t.shape[-1] != w:
+            t = F.pad(t, (0, w - t.shape[-1], 0, h - t.shape[-2]))
+        return t
+
+    def forward(self, x):
+        d1 = self.act(self.down1(x))          # width -> branch_width, H/2 x W/2
+        d2 = self.act(self.down2(d1))          # branch_width -> branch_width, H/4 x W/4
+        u2 = self._match(self.up2(d2), d1) + d1     # branch_width, H/2 x W/2 (skip: down1 output)
+        u1 = self._match(self.up1(u2), x) + x       # width, H x W (skip: branch input)
+        return u1
+
+
 class FNO2d(nn.Module):
-    def __init__(self, in_channels, out_channels, modes1=16, modes2=16, width=64, n_layers=4, pad=0, local_conv=False):
+    def __init__(self, in_channels, out_channels, modes1=16, modes2=16, width=64, n_layers=4,
+                 pad=0, local_conv=False, unet=False, unet_width=None):
         """pad > 0 zero-pads the lifted field by `pad` cells on the right/bottom before the
         Fourier layers and crops afterwards (domain padding for non-periodic problems, as in
         Li et al. 2021; the CFD cylinder in a square frame is not periodic). local_conv adds a
         depthwise 3x3 + pointwise branch next to each spectral layer so the network can
         represent scales below the Fourier cut-off (48 of 252 modes = nothing under 21 m).
-        Both default off, so existing checkpoints load unchanged."""
+        unet adds a small U-Net branch (see UNetBranch) parallel to the spectral branch in
+        every Fourier layer (U-FNO, fno_v4 candidate); unet_width overrides its internal
+        width (default width // 2) e.g. to width // 4 if the default OOMs.
+        All three default off, so existing checkpoints load unchanged."""
         super().__init__()
         self.width = width
         self.pad = int(pad)
@@ -59,6 +114,12 @@ class FNO2d(nn.Module):
             nn.Sequential(nn.Conv2d(width, width, kernel_size=3, padding=1, groups=width), nn.Conv2d(width, width, kernel_size=1))
             for _ in range(n_layers)
         ]) if local_conv else None
+        self.unet_layers = nn.ModuleList([
+            UNetBranch(width, branch_width=unet_width) for _ in range(n_layers)
+        ]) if unet else None
+        # resolved branch width, for provenance in the checkpoint's config payload
+        # (None when unet=False, matching local_conv/pad's "off" convention)
+        self.unet_width = self.unet_layers[0].branch_width if unet else None
         self.activation = nn.GELU()
         self.out_proj = nn.Sequential(
             nn.Conv2d(width, width//2, kernel_size=1),
@@ -81,9 +142,12 @@ class FNO2d(nn.Module):
         if self.pad:
             x = torch.nn.functional.pad(x, (0, self.pad, 0, self.pad))
         for i, block in enumerate(self.fourier_layers):
-            spec = block[0](x)
-            point = block[1](x)
-            x = x + spec + point # Residual connection
+            block_in = x
+            spec = block[0](block_in)
+            point = block[1](block_in)
+            x = block_in + spec + point # Residual connection
+            if self.unet_layers is not None:
+                x = x + self.unet_layers[i](block_in)  # U-FNO branch, parallel to spec/point (same input)
             if self.local_layers is not None:
                 x = x + self.local_layers[i](x)
             x = self.activation(x)
@@ -152,8 +216,32 @@ def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
                         grad_weight=0.0, spectral_weight=0.0,
                         peak_weight=0.0, wake_weight=0.0,
                         wake_threshold=-0.3, channel_weights=None,
+                        loss_type='mse',
                         return_components=False):
     """Multi-component loss for FNO training.
+
+    loss_type='mse' (default -- v2/v3 behavior, numerically unchanged): total_loss =
+    mse_loss (per-channel-weighted, masked MEAN SQUARED error on y, see
+    _per_channel_weighted) + grad_weight*gradient_loss (masked MSE of finite
+    differences) + spectral_weight*spectral_loss (unmasked FFT-magnitude MSE on
+    channel 0) + peak_weight*peak_loss (masked MSE on extreme-value cells of
+    channel 0) + wake_weight*wake_loss (masked MSE on low-wind cells of channel 0).
+    distributed.py ramps grad/spectral/peak/wake from 0 over the first
+    WARMUP_EPOCHS (get_loss_weights); this is "the current MSE composite"
+    docs/fno_gnn_improvements.md refers to.
+
+    loss_type='l1' (fno_v4 candidate B -- masked L1 "instead of the current MSE
+    composite", Thuerey: "L1 yields slight improvements" over L2): total_loss is
+    ONLY the per-channel-weighted, masked MEAN ABSOLUTE error on y -- same
+    channel_weights and same per-channel sensor_mask (build_channel_mask) as the
+    mse_loss term above, just |pred-target| instead of (pred-target)**2. The
+    gradient/spectral/peak/wake terms are an "instead of", not an "in addition
+    to": whatever grad_weight/spectral_weight/peak_weight/wake_weight the caller
+    passes are forced to 0 (and therefore not computed -- each is already gated
+    by `if weight > 0`, so this costs nothing extra, notably skipping the FFT in
+    spectral_loss). return_components still reports them as 0.0 so callers that
+    log every component (distributed.py's running_grad/running_spec/...) need no
+    special-casing.
 
     channel_weights: optional per-output-channel importance, e.g.
     [1.0, 0.5, 0.5, 0.25] for [U, k, U_roof, k_roof]. See
@@ -163,7 +251,15 @@ def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
     if sensor_mask is None:
         sensor_mask = torch.ones_like(y_pred)
 
-    mse_loss = _per_channel_weighted((y_pred - y_target) ** 2, sensor_mask, channel_weights)
+    if loss_type == 'l1':
+        grad_weight = spectral_weight = peak_weight = wake_weight = 0.0
+        base_err = (y_pred - y_target).abs()
+    elif loss_type == 'mse':
+        base_err = (y_pred - y_target) ** 2
+    else:
+        raise ValueError(f"sensor_weighted_mse: unknown loss_type {loss_type!r}, expected 'mse' or 'l1'")
+
+    mse_loss = _per_channel_weighted(base_err, sensor_mask, channel_weights)
 
     gradient_loss = torch.tensor(0.0, device=y_pred.device)
     if grad_weight > 0:

@@ -64,6 +64,9 @@ MODES1 = config.get('model', {}).get('modes1', 32)
 MODES2 = config.get('model', {}).get('modes2', 32)
 WIDTH = config.get('model', {}).get('width', 64)
 N_LAYERS = config.get('model', {}).get('n_layers', 5)
+# fno_v4: internal width of the (optional) U-Net branch; None = UNetBranch's
+# default (width // 2). Override here (e.g. width // 4) only if that OOMs.
+UNET_WIDTH = config.get('model', {}).get('unet_width', None)
 # FIX: physics terms now ramp from 0 over WARMUP_EPOCHS
 # to prevent the model collapsing to a flat constant field early in training.
 GRAD_WEIGHT     = config.get('loss', {}).get('gradient_weight', 1.5)
@@ -416,6 +419,9 @@ def main():
     parser.add_argument('--pad', type=int, default=0, help='FNO domain padding in cells (non-periodic domain); 0 = off')
     parser.add_argument('--local-conv', action='store_true', help='add a depthwise 3x3 branch next to each spectral layer')
     parser.add_argument('--canon', action='store_true', help='wind-aligned canonicalisation of the inputs (exact flips/transposes)')
+    parser.add_argument('--unet', action='store_true', help='fno_v4: add a small U-Net branch (U-FNO) to each Fourier layer, default off')
+    parser.add_argument('--loss', type=str, default='mse', choices=['mse', 'l1'],
+                         help="fno_v4: 'l1' replaces the MSE composite with masked L1 on y (same channel weighting/masking); default 'mse' (v2/v3 behavior)")
     args = parser.parse_args()
     global EPOCHS, PATIENCE
     if args.epochs is not None:
@@ -526,11 +532,13 @@ def main():
 
     if is_main_process(rank):
         print("CREATING MODEL...")
-        print(f"  FNO2d: modes=({MODES1},{MODES2}), width={WIDTH}, layers={N_LAYERS}, pad={args.pad}, local_conv={args.local_conv}, canon={args.canon}")
+        print(f"  FNO2d: modes=({MODES1},{MODES2}), width={WIDTH}, layers={N_LAYERS}, pad={args.pad}, "
+              f"local_conv={args.local_conv}, canon={args.canon}, unet={args.unet} (unet_width={UNET_WIDTH}), loss={args.loss}")
 
     # Create model
     model = FNO2d(in_channels=in_ch, out_channels=out_ch, modes1=MODES1, modes2=MODES2,
-                  width=WIDTH, n_layers=N_LAYERS, pad=args.pad, local_conv=args.local_conv).to(device)
+                  width=WIDTH, n_layers=N_LAYERS, pad=args.pad, local_conv=args.local_conv,
+                  unet=args.unet, unet_width=UNET_WIDTH).to(device)
 
     if is_distributed:
         model = DDP(model, device_ids=[local_rank])
@@ -680,6 +688,7 @@ def main():
                                                 peak_weight=w['peak_weight'],
                                                 wake_weight=w['wake_weight'],
                                                 channel_weights=CHANNEL_WEIGHTS,
+                                                loss_type=args.loss,
                                                 return_components=True)
             opt.zero_grad()
             loss.backward()
@@ -721,7 +730,8 @@ def main():
                                             spectral_weight=w['spectral_weight'],
                                             peak_weight=w['peak_weight'],
                                             wake_weight=w['wake_weight'],
-                                            channel_weights=CHANNEL_WEIGHTS)
+                                            channel_weights=CHANNEL_WEIGHTS,
+                                            loss_type=args.loss)
                 val_running += float(v_loss.item()) * xb.shape[0]
 
         scheduler.step()
@@ -790,6 +800,7 @@ def main():
                 # Only Rank 0 saves the model
                 if is_main_process(rank):
                     state_dict = model.module.state_dict() if is_distributed else model.state_dict()
+                    bare_model = model.module if is_distributed else model
                     # Payload including training history for tools/plot_all_histories.py
                     payload = {
                         'model_state_dict': state_dict,
@@ -805,6 +816,12 @@ def main():
                             'pad': args.pad,
                             'local_conv': args.local_conv,
                             'canon': args.canon,
+                            # fno_v4: unet/unet_width let predict.py rebuild the exact
+                            # architecture; loss is recorded for provenance only (it does
+                            # not change the model, so it is not read back by predict.py).
+                            'unet': args.unet,
+                            'unet_width': bare_model.unet_width,
+                            'loss': args.loss,
                         }
                     }
                     temp_out = MODEL_OUT + ".tmp"
