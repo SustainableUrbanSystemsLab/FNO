@@ -20,22 +20,87 @@ class SpectralConv2d(nn.Module):
         return torch.einsum("bixy,ioxy->boxy", input, weights)
 
     def forward(self, x):
-        batchsize = x.shape[0]
-        # Real-to-complex FFT
-        x_ft = torch.fft.rfft2(x)
+        # cuFFT has no bf16 kernels, and under the fno_v5 gridnets recipe autocast would
+        # hand it a bf16 tensor: run the spectral branch in fp32 and return the caller's
+        # dtype. A no-op for the fp32 recipes (v1-v4).
+        in_dtype = x.dtype
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            x = x.float()
+            batchsize = x.shape[0]
+            # Real-to-complex FFT
+            x_ft = torch.fft.rfft2(x)
 
-        # Output shape matches rfft2 output: (B, C, H, W//2 + 1)
-        out_ft = torch.zeros(batchsize, self.out_channels, x.size(-2), x.size(-1)//2 + 1, dtype=torch.complex64, device=x.device)
-        
-        # Multiply relevant corners
-        out_ft[:, :, :self.modes1, :self.modes2] = \
-            self.compl_mul2d(x_ft[:, :, :self.modes1, :self.modes2], self.weights1)
-        out_ft[:, :, -self.modes1:, :self.modes2] = \
-            self.compl_mul2d(x_ft[:, :, -self.modes1:, :self.modes2], self.weights2)
+            # Output shape matches rfft2 output: (B, C, H, W//2 + 1)
+            out_ft = torch.zeros(batchsize, self.out_channels, x.size(-2), x.size(-1)//2 + 1, dtype=torch.complex64, device=x.device)
 
-        # Inverse complex-to-real FFT
-        x = torch.fft.irfft2(out_ft, s=(x.size(-2), x.size(-1)))
-        return x
+            # Multiply relevant corners
+            out_ft[:, :, :self.modes1, :self.modes2] = \
+                self.compl_mul2d(x_ft[:, :, :self.modes1, :self.modes2], self.weights1)
+            out_ft[:, :, -self.modes1:, :self.modes2] = \
+                self.compl_mul2d(x_ft[:, :, -self.modes1:, :self.modes2], self.weights2)
+
+            # Inverse complex-to-real FFT
+            x = torch.fft.irfft2(out_ft, s=(x.size(-2), x.size(-1)))
+        return x.to(in_dtype)
+
+
+class FactorizedSpectralConv2d(nn.Module):
+    """Separable spectral convolution of the Factorized FNO (Tran et al., ICLR 2023,
+    arXiv:2111.13802): one 1-D Fourier mixing along H and one along W, summed, with
+    weights (in, out, modes) per axis instead of (in, out, modes1, modes2). Parameters
+    grow with modes1 + modes2 rather than modes1 * modes2, which is what makes a high
+    mode cut-off affordable: fno_v5b runs 128 modes at width 96 for 2 * 96*96*128 =
+    2.4 M complex weights per layer, against the dense layer's 2 * 64*64*48*48 = 18.9 M
+    at only 48 modes (a 21 m cut-off on the 2 m grid; 128 modes reach ~8 m).
+    A 1-D rfft along one axis of a real field is lossless, so unlike the dense rfft2
+    layer no second "corner" of negative frequencies is needed. Drop-in for
+    SpectralConv2d inside the existing Fourier layer (FNO2d factorized=True)."""
+    def __init__(self, in_channels, out_channels, modes1, modes2):
+        super().__init__()
+        self.in_channels, self.out_channels = in_channels, out_channels
+        self.modes1, self.modes2 = modes1, modes2
+        scale = 1.0 / (in_channels * out_channels)
+        self.weights_h = nn.Parameter(scale * torch.randn(in_channels, out_channels, modes1, dtype=torch.complex64))
+        self.weights_w = nn.Parameter(scale * torch.randn(in_channels, out_channels, modes2, dtype=torch.complex64))
+
+    def forward(self, x):
+        in_dtype = x.dtype
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            x = x.float()
+            B, _, H, W = x.shape
+            m1, m2 = min(self.modes1, H // 2 + 1), min(self.modes2, W // 2 + 1)
+            x_h = torch.fft.rfft(x, dim=-2)                                   # (B, C, H//2+1, W)
+            o_h = torch.zeros(B, self.out_channels, H // 2 + 1, W, dtype=torch.complex64, device=x.device)
+            o_h[:, :, :m1] = torch.einsum("bihw,ioh->bohw", x_h[:, :, :m1], self.weights_h[:, :, :m1])
+            y_h = torch.fft.irfft(o_h, n=H, dim=-2)
+            x_w = torch.fft.rfft(x, dim=-1)                                   # (B, C, H, W//2+1)
+            o_w = torch.zeros(B, self.out_channels, H, W // 2 + 1, dtype=torch.complex64, device=x.device)
+            o_w[..., :m2] = torch.einsum("bihw,iow->bohw", x_w[..., :m2], self.weights_w[:, :, :m2])
+            y_w = torch.fft.irfft(o_w, n=W, dim=-1)
+            y = y_h + y_w
+        return y.to(in_dtype)
+
+
+class ConvNeXtBlock(nn.Module):
+    """ConvNeXt block (Liu et al. 2022) as the local branch of a Fourier layer (fno_v5b,
+    FNO2d local_kind="convnext"): 7x7 depthwise conv, channels-last LayerNorm, 4x MLP
+    with GELU, layer scale. Returns the residual only; FNO2d adds it to the layer state
+    exactly as it adds the dw3 branch. This is the block that separates U-NeXt from the
+    plain U-Net in the benchmark, so the FNO's local path gets the same one."""
+    def __init__(self, width, kernel=7, mlp_ratio=4, layer_scale=1e-6):
+        super().__init__()
+        self.dw = nn.Conv2d(width, width, kernel_size=kernel, padding=kernel // 2, groups=width)
+        self.norm = nn.LayerNorm(width)
+        self.fc1 = nn.Linear(width, mlp_ratio * width)
+        self.act = nn.GELU()
+        self.fc2 = nn.Linear(mlp_ratio * width, width)
+        self.gamma = nn.Parameter(layer_scale * torch.ones(width))
+
+    def forward(self, x):
+        y = self.dw(x).permute(0, 2, 3, 1)
+        y = self.fc2(self.act(self.fc1(self.norm(y))))
+        return (self.gamma * y).permute(0, 3, 1, 2)
+
 
 class UNetBranch(nn.Module):
     """Small 2-level U-Net side branch for a U-FNO Fourier layer (Wen et al. 2022,
@@ -90,7 +155,8 @@ class UNetBranch(nn.Module):
 
 class FNO2d(nn.Module):
     def __init__(self, in_channels, out_channels, modes1=16, modes2=16, width=64, n_layers=4,
-                 pad=0, local_conv=False, unet=False, unet_width=None):
+                 pad=0, local_conv=False, unet=False, unet_width=None, factorized=False, local_kind="dw3",
+                 res_scale=1.0):
         """pad > 0 zero-pads the lifted field by `pad` cells on the right/bottom before the
         Fourier layers and crops afterwards (domain padding for non-periodic problems, as in
         Li et al. 2021; the CFD cylinder in a square frame is not periodic). local_conv adds a
@@ -99,21 +165,42 @@ class FNO2d(nn.Module):
         unet adds a small U-Net branch (see UNetBranch) parallel to the spectral branch in
         every Fourier layer (U-FNO, fno_v4 candidate); unet_width overrides its internal
         width (default width // 2) e.g. to width // 4 if the default OOMs.
-        All three default off, so existing checkpoints load unchanged."""
+        factorized swaps the dense spectral layer for the F-FNO separable one (fno_v5b; see
+        FactorizedSpectralConv2d) and local_kind="convnext" makes the local branch a ConvNeXt
+        block instead of the dw3 pair (fno_v5b; requires local_conv).
+
+        res_scale multiplies every branch added to the residual stream. The layers are
+        unnormalised (x = x + spec + point + ...), so activations grow geometrically with
+        depth: measured at init, each layer multiplies the std by ~2.15, taking v4's four
+        layers from 0.38 to 5.6 and eight layers to 60 (a 13x hotter starting loss). Setting
+        res_scale = 1/sqrt(n_layers) makes the starting scale depth-independent, which is what
+        fno_v5b uses at n_layers=8. Default 1.0 = the v1-v4 behaviour, bit-for-bit.
+        Everything defaults off, so existing checkpoints load unchanged."""
         super().__init__()
+        if local_kind not in ("dw3", "convnext"):
+            raise ValueError(f"FNO2d: local_kind must be 'dw3' or 'convnext', got {local_kind!r}")
         self.width = width
         self.pad = int(pad)
+        self.factorized = bool(factorized)
+        self.local_kind = local_kind
+        self.res_scale = float(res_scale)
+        spectral = FactorizedSpectralConv2d if factorized else SpectralConv2d
         self.in_proj = nn.Conv2d(in_channels, width, kernel_size=1)
         self.fourier_layers = nn.ModuleList([
             nn.Sequential(
-                SpectralConv2d(width, width, modes1, modes2),
+                spectral(width, width, modes1, modes2),
                 nn.Conv2d(width, width, kernel_size=1)
             ) for _ in range(n_layers)
         ])
-        self.local_layers = nn.ModuleList([
-            nn.Sequential(nn.Conv2d(width, width, kernel_size=3, padding=1, groups=width), nn.Conv2d(width, width, kernel_size=1))
-            for _ in range(n_layers)
-        ]) if local_conv else None
+        if local_conv and local_kind == "convnext":
+            self.local_layers = nn.ModuleList([ConvNeXtBlock(width) for _ in range(n_layers)])
+        elif local_conv:
+            self.local_layers = nn.ModuleList([
+                nn.Sequential(nn.Conv2d(width, width, kernel_size=3, padding=1, groups=width), nn.Conv2d(width, width, kernel_size=1))
+                for _ in range(n_layers)
+            ])
+        else:
+            self.local_layers = None
         self.unet_layers = nn.ModuleList([
             UNetBranch(width, branch_width=unet_width) for _ in range(n_layers)
         ]) if unet else None
@@ -141,15 +228,16 @@ class FNO2d(nn.Module):
         H, W = x.shape[-2:]
         if self.pad:
             x = torch.nn.functional.pad(x, (0, self.pad, 0, self.pad))
+        s = self.res_scale
         for i, block in enumerate(self.fourier_layers):
             block_in = x
             spec = block[0](block_in)
             point = block[1](block_in)
-            x = block_in + spec + point # Residual connection
+            x = block_in + s * (spec + point)  # Residual connection
             if self.unet_layers is not None:
-                x = x + self.unet_layers[i](block_in)  # U-FNO branch, parallel to spec/point (same input)
+                x = x + s * self.unet_layers[i](block_in)  # U-FNO branch, parallel to spec/point (same input)
             if self.local_layers is not None:
-                x = x + self.local_layers[i](x)
+                x = x + s * self.local_layers[i](x)
             x = self.activation(x)
         if self.pad:
             x = x[..., :H, :W]
@@ -254,10 +342,19 @@ def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
     if loss_type == 'l1':
         grad_weight = spectral_weight = peak_weight = wake_weight = 0.0
         base_err = (y_pred - y_target).abs()
+    elif loss_type == 'l1g':
+        # fno_v5: masked L1 + grad_weight * masked L1 of the finite differences -- the
+        # gridnets loss (benchmark/adapters/gridnets/train.py masked_l1 + grad_l1) that
+        # every other model in the table trains on. v4's 'l1' dropped the gradient term
+        # together with the rest of the composite; this keeps only that term, as L1.
+        # spectral/peak/wake stay off exactly as under 'l1'.
+        spectral_weight = peak_weight = wake_weight = 0.0
+        base_err = (y_pred - y_target).abs()
     elif loss_type == 'mse':
         base_err = (y_pred - y_target) ** 2
     else:
-        raise ValueError(f"sensor_weighted_mse: unknown loss_type {loss_type!r}, expected 'mse' or 'l1'")
+        raise ValueError(f"sensor_weighted_mse: unknown loss_type {loss_type!r}, expected 'mse', 'l1' or 'l1g'")
+    grad_err = (lambda d: d.abs()) if loss_type == 'l1g' else (lambda d: d ** 2)
 
     mse_loss = _per_channel_weighted(base_err, sensor_mask, channel_weights)
 
@@ -273,8 +370,8 @@ def sensor_weighted_mse(y_pred, y_target, sensor_mask=None,
         # the roof channels' -- measured on val)
         m_dx = sensor_mask[:, :, :, 1:] * sensor_mask[:, :, :, :-1]
         m_dy = sensor_mask[:, :, 1:, :] * sensor_mask[:, :, :-1, :]
-        gradient_loss = (_per_channel_weighted((p_dx - t_dx) ** 2, m_dx, channel_weights)
-                          + _per_channel_weighted((p_dy - t_dy) ** 2, m_dy, channel_weights))
+        gradient_loss = (_per_channel_weighted(grad_err(p_dx - t_dx), m_dx, channel_weights)
+                          + _per_channel_weighted(grad_err(p_dy - t_dy), m_dy, channel_weights))
     
     spectral_loss = torch.tensor(0.0, device=y_pred.device)
     if spectral_weight > 0:

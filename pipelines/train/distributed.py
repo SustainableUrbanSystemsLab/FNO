@@ -2,7 +2,7 @@
 # Usage: torchrun --nproc_per_node=2 train_fno_distributed.py
 #    or: python train_fno_distributed.py (falls back to single GPU)
 
-import os, glob, numpy as np, torch, sys, argparse, time
+import os, glob, numpy as np, torch, sys, argparse, time, copy, math
 from datetime import datetime
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -118,6 +118,23 @@ def cleanup_distributed():
 def is_main_process(rank):
     return rank == 0
 
+
+class EMA:
+    """Exponential moving average of the weights (fno_v5 --recipe gridnets; mirrors
+    benchmark/adapters/gridnets/train.py::EMA so the FNO is selected and exported the
+    same way as every other model). The shadow copy is what gets validated and saved."""
+    def __init__(self, model, decay):
+        self.decay, self.shadow = decay, copy.deepcopy(model).eval()
+        for p in self.shadow.parameters():
+            p.requires_grad_(False)
+
+    @torch.no_grad()
+    def update(self, model):
+        for s, p in zip(self.shadow.parameters(), model.parameters()):
+            s.mul_(self.decay).add_(p.detach(), alpha=1 - self.decay)
+        for s, b in zip(self.shadow.buffers(), model.buffers()):
+            s.copy_(b)
+
 # ============ Dataset for monolithic X.npy / Y.npy ============
 #
 # The X.npy/Y.npy on ICE were created by the Conditional Transformer's
@@ -168,10 +185,13 @@ def build_channel_mask(xb, out_ch):
     Y went from 1 to 4 channels, and skipping any building/roof masking.
     Returning a mask shaped exactly like y_pred/y_target fixes both at once.
 
-    For out_ch <= 1 this returns the original full-domain ones mask,
-    preserving single-channel training behavior exactly.
+    out_ch == 1 (fno_v5, --out-ch 1) gets channel 0's own pedestrian mask: building
+    footprints and the corners outside the CFD circle carry no target and must stay
+    out of the loss exactly as they do for the 4-channel layout. (The pre-benchmark
+    single-channel runs trained on a full ones mask; none of the paper's runs did,
+    so nothing scored changes.)
     """
-    if out_ch <= 1:
+    if out_ch < 1:
         return torch.ones_like(xb[:, 0:1, :, :])
 
     bldg = (xb[:, 1:2, :, :] > 0).float()   # FNO Ch1 = Bldg_height / 50
@@ -260,7 +280,7 @@ class NpyDataset(Dataset):
       3. Building-centered coordinate computation
       4. Target conversion: mag_U -> delta_u = (mag - U_ref) / U_ref
     """
-    def __init__(self, X_path, Y_path, augment=False, subset=None, canon=False):
+    def __init__(self, X_path, Y_path, augment=False, subset=None, canon=False, out_ch=None):
         if not os.path.exists(X_path):
             raise FileNotFoundError(f"X.npy not found at {X_path}")
         if not os.path.exists(Y_path):
@@ -271,6 +291,7 @@ class NpyDataset(Dataset):
         self.Y = np.load(Y_path, mmap_mode='r')  # (N, C_y, H, W)
         self.augment = augment
         self.canon = canon  # wind-aligned canonicalisation of the raw sample before the FNO remap
+        self.out_ch = int(out_ch) if out_ch else None  # fno_v5: keep only the first out_ch target channels (1 = mag_U)
         # data-scaling study: optional .npy of row indices into this split (benchmark/make_subsets.py)
         self.idx = np.load(subset).astype(np.int64) if subset else None
         if self.idx is not None:
@@ -381,6 +402,8 @@ class NpyDataset(Dataset):
         # Remap from Transformer format to FNO format if needed
         if self.needs_remap:
             x, y = self._remap_to_fno(x, y)
+        if self.out_ch:
+            y = y[:self.out_ch]
 
         if self.augment and canon_dir is not None:
             # only the symmetry that keeps the canonical direction: mirror about the wind axis.
@@ -420,9 +443,27 @@ def main():
     parser.add_argument('--local-conv', action='store_true', help='add a depthwise 3x3 branch next to each spectral layer')
     parser.add_argument('--canon', action='store_true', help='wind-aligned canonicalisation of the inputs (exact flips/transposes)')
     parser.add_argument('--unet', action='store_true', help='fno_v4: add a small U-Net branch (U-FNO) to each Fourier layer, default off')
-    parser.add_argument('--loss', type=str, default='mse', choices=['mse', 'l1'],
-                         help="fno_v4: 'l1' replaces the MSE composite with masked L1 on y (same channel weighting/masking); default 'mse' (v2/v3 behavior)")
+    parser.add_argument('--loss', type=str, default='mse', choices=['mse', 'l1', 'l1g'],
+                         help="fno_v4: 'l1' replaces the MSE composite with masked L1 on y (same channel weighting/masking); "
+                              "fno_v5: 'l1g' = masked L1 + --grad-weight * masked gradient-L1 (the gridnets loss); default 'mse' (v2/v3 behavior)")
+    parser.add_argument('--grad-weight', type=float, default=0.5, help="fno_v5: weight of the gradient-L1 term under --loss l1g (gridnets: 0.5)")
+    parser.add_argument('--out-ch', type=int, default=0, help='fno_v5: train/export only the first N target channels (1 = mag_U, the scored one); 0 = all')
+    parser.add_argument('--factorized', action='store_true', help='fno_v5b: F-FNO separable spectral convolution (parameters ~ modes, not modes^2)')
+    parser.add_argument('--local-kind', type=str, default='dw3', choices=['dw3', 'convnext'], help='fno_v5b: local branch type when --local-conv is on')
+    parser.add_argument('--res-scale', type=str, default='1.0',
+                         help="fno_v5b: scale on every residual branch; 'auto' = 1/sqrt(n_layers), which keeps the "
+                              "init activation scale depth-independent (the unnormalised stack grows ~2.15x per layer). "
+                              "Default 1.0 = v1-v4 behaviour")
+    parser.add_argument('--recipe', type=str, default='team', choices=['team', 'gridnets'],
+                         help="fno_v5: 'gridnets' = AdamW (wd 0.05, betas .9/.95), per-step warm-up + cosine, grad-clip 1, EMA weights "
+                              "validated and exported, bf16 autocast -- the benchmark recipe every other model trains on; "
+                              "'team' = this pipeline's own Adam / per-epoch cosine (v1-v4)")
+    parser.add_argument('--amp', type=str, default=None, choices=['bf16', 'fp32'], help='autocast dtype; default bf16 under --recipe gridnets, fp32 otherwise')
+    parser.add_argument('--ema', type=float, default=0.999, help='EMA decay under --recipe gridnets')
     args = parser.parse_args()
+    if args.local_kind == 'convnext' and not args.local_conv:
+        parser.error('--local-kind convnext needs --local-conv')
+    res_scale = 1.0 / math.sqrt(N_LAYERS) if args.res_scale == 'auto' else float(args.res_scale)
     global EPOCHS, PATIENCE
     if args.epochs is not None:
         EPOCHS = args.epochs
@@ -464,8 +505,8 @@ def main():
         print(f"  Y path: {y_path}")
 
     if args.val_dir and os.path.exists(os.path.join(args.val_dir, 'X.npy')):
-        train_dataset = NpyDataset(x_path, y_path, augment=True, subset=args.train_subset, canon=args.canon)
-        val_dataset = NpyDataset(os.path.join(args.val_dir, 'X.npy'), os.path.join(args.val_dir, 'Y.npy'), augment=False, canon=args.canon)
+        train_dataset = NpyDataset(x_path, y_path, augment=True, subset=args.train_subset, canon=args.canon, out_ch=args.out_ch)
+        val_dataset = NpyDataset(os.path.join(args.val_dir, 'X.npy'), os.path.join(args.val_dir, 'Y.npy'), augment=False, canon=args.canon, out_ch=args.out_ch)
         total_samples = len(train_dataset) + len(val_dataset)
         train_dataset_full = train_dataset
         if is_main_process(rank): print(f"Using explicitly specified val_dir: {args.val_dir}", flush=True)
@@ -533,12 +574,15 @@ def main():
     if is_main_process(rank):
         print("CREATING MODEL...")
         print(f"  FNO2d: modes=({MODES1},{MODES2}), width={WIDTH}, layers={N_LAYERS}, pad={args.pad}, "
-              f"local_conv={args.local_conv}, canon={args.canon}, unet={args.unet} (unet_width={UNET_WIDTH}), loss={args.loss}")
+              f"local_conv={args.local_conv} ({args.local_kind}), factorized={args.factorized}, canon={args.canon}, "
+              f"unet={args.unet} (unet_width={UNET_WIDTH}), res_scale={res_scale:.4f}, out_ch={out_ch}, loss={args.loss}"
+              f"{f' (grad {args.grad_weight})' if args.loss == 'l1g' else ''}, recipe={args.recipe}")
 
     # Create model
     model = FNO2d(in_channels=in_ch, out_channels=out_ch, modes1=MODES1, modes2=MODES2,
                   width=WIDTH, n_layers=N_LAYERS, pad=args.pad, local_conv=args.local_conv,
-                  unet=args.unet, unet_width=UNET_WIDTH).to(device)
+                  unet=args.unet, unet_width=UNET_WIDTH, factorized=args.factorized, local_kind=args.local_kind,
+                  res_scale=res_scale).to(device)
 
     if is_distributed:
         model = DDP(model, device_ids=[local_rank])
@@ -548,8 +592,26 @@ def main():
         print(f"  Total parameters: {total_params:,}")
         print("=" * 50)
 
-    opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)  # Smooth LR decay
+    bare_model = model.module if is_distributed else model
+    steps_per_epoch = max(1, len(train_loader))
+    amp = args.amp or ('bf16' if args.recipe == 'gridnets' else 'fp32')
+    amp_enabled = amp == 'bf16'
+
+    def make_scheduler(opt):
+        if args.recipe == 'gridnets':
+            # per optimizer step: linear warm-up over min(one epoch, 500 steps), then cosine
+            # to zero over the whole budget (gridnets/train.py); stepped inside the batch loop
+            total, warm = EPOCHS * steps_per_epoch, min(steps_per_epoch, 500)
+            return torch.optim.lr_scheduler.LambdaLR(
+                opt, lambda s: min(1.0, (s + 1) / warm) * 0.5 * (1 + math.cos(math.pi * min(s, total) / total)))
+        return torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)  # Smooth LR decay
+
+    if args.recipe == 'gridnets':
+        opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=0.05, betas=(0.9, 0.95))
+    else:
+        opt = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
+    scheduler = make_scheduler(opt)
+    ema = EMA(bare_model, args.ema) if args.recipe == 'gridnets' else None
 
     # Checkpoint resume logic (auto-detect)
     start_epoch = 1
@@ -570,6 +632,11 @@ def main():
             model.load_state_dict(checkpoint['model'])
         opt.load_state_dict(checkpoint['optimizer'])
         scheduler.load_state_dict(checkpoint['scheduler'])
+        if ema is not None:
+            if checkpoint.get('ema') is not None:
+                ema.shadow.load_state_dict(checkpoint['ema'])
+            else:
+                ema.shadow.load_state_dict(bare_model.state_dict())
         start_epoch = checkpoint['epoch'] + 1
         best_loss = checkpoint['best_loss']
         patience_counter = checkpoint['patience_counter']
@@ -589,7 +656,7 @@ def main():
                 print(f"  [INFO] Learning rate updated to {LR}")
 
             # 2. Reset Scheduler (to respect new epochs and LR)
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=1e-6)
+            scheduler = make_scheduler(opt)
             if is_main_process(rank):
                 print(f"  [INFO] Scheduler reset with T_max={EPOCHS}")
 
@@ -653,6 +720,12 @@ def main():
     train_losses = []
     val_losses = []
 
+    def loss_weights(epoch):
+        # 'l1g' has one fixed term (no ramp, like gridnets); the composites keep their warm-up ramp
+        if args.loss == 'l1g':
+            return dict(grad_weight=args.grad_weight, spectral_weight=0.0, peak_weight=0.0, wake_weight=0.0)
+        return get_loss_weights(epoch)
+
     for epoch in range(start_epoch, target_end_epoch + 1):
         epoch_start = time.time()
         if is_distributed:
@@ -678,10 +751,12 @@ def main():
 
             mb = build_channel_mask(xb, out_ch)
 
-            pred = model(xb)
+            with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=amp_enabled):
+                pred = model(xb)
+            pred = pred.float()  # loss in fp32 whatever the forward ran in
 
             # Use epoch-dependent warmup weights
-            w = get_loss_weights(epoch)
+            w = loss_weights(epoch)
             loss, components = sensor_weighted_mse(pred, yb, sensor_mask=mb,
                                                 grad_weight=w['grad_weight'],
                                                 spectral_weight=w['spectral_weight'],
@@ -692,7 +767,13 @@ def main():
                                                 return_components=True)
             opt.zero_grad()
             loss.backward()
+            if args.recipe == 'gridnets':
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
+            if ema is not None:
+                ema.update(bare_model)
+            if args.recipe == 'gridnets':
+                scheduler.step()
 
             batch_size = xb.shape[0]
             running += float(loss.item()) * batch_size
@@ -707,6 +788,7 @@ def main():
 
         # --- Validation Pass ---
         model.eval()
+        eval_model = ema.shadow if ema is not None else model  # gridnets: select on the EMA weights, which are what gets exported
         val_running = 0.0
         val_se, val_n = 0.0, 0.0  # masked squared error of the scored quantity (U / U_ref)
         with torch.no_grad():
@@ -714,7 +796,9 @@ def main():
                 xb, yb = batch
                 xb = xb.to(device); yb = yb.to(device)
                 mb = build_channel_mask(xb, out_ch)
-                pred = model(xb)
+                with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=amp_enabled):
+                    pred = eval_model(xb)
+                pred = pred.float()
                 # benchmark-aligned selection metric: RMSE of U on open-ground domain
                 # cells; delta_u -> U/U_ref via the constant inlet ratio 0.26
                 m0 = (mb[:, 0] > 0) & (xb[:, 3] > 0)
@@ -724,7 +808,7 @@ def main():
                 # Validation always uses the fully ramped weights so the val loss is
                 # comparable across epochs; with the training ramp, the epoch-1 loss
                 # was the smallest by construction and stayed "best" forever.
-                w = get_loss_weights(WARMUP_EPOCHS)
+                w = loss_weights(WARMUP_EPOCHS)
                 v_loss = sensor_weighted_mse(pred, yb, sensor_mask=mb,
                                             grad_weight=w['grad_weight'],
                                             spectral_weight=w['spectral_weight'],
@@ -734,7 +818,8 @@ def main():
                                             loss_type=args.loss)
                 val_running += float(v_loss.item()) * xb.shape[0]
 
-        scheduler.step()
+        if args.recipe != 'gridnets':
+            scheduler.step()  # the gridnets schedule is stepped per optimizer step above
         n_train = len(train_dataset)
         n_val = len(val_dataset)
 
@@ -779,6 +864,7 @@ def main():
                     'scheduler': scheduler.state_dict(),
                     'best_loss': best_loss,
                     'patience_counter': patience_counter,
+                    'ema': ema.shadow.state_dict() if ema is not None else None,
                 }
                 torch.save(checkpoint, CHECKPOINT_PATH)
                 print(f"  > Latest checkpoint saved to {CHECKPOINT_PATH}")
@@ -799,8 +885,8 @@ def main():
 
                 # Only Rank 0 saves the model
                 if is_main_process(rank):
-                    state_dict = model.module.state_dict() if is_distributed else model.state_dict()
-                    bare_model = model.module if is_distributed else model
+                    # gridnets recipe: the EMA weights are what was validated, so they are what is exported
+                    state_dict = (ema.shadow if ema is not None else bare_model).state_dict()
                     # Payload including training history for tools/plot_all_histories.py
                     payload = {
                         'model_state_dict': state_dict,
@@ -822,6 +908,16 @@ def main():
                             'unet': args.unet,
                             'unet_width': bare_model.unet_width,
                             'loss': args.loss,
+                            # fno_v5: factorized/local_kind rebuild the architecture in predict.py;
+                            # the rest is provenance (out_ch is also implied by the state dict)
+                            'factorized': args.factorized,
+                            'local_kind': args.local_kind,
+                            'res_scale': res_scale,
+                            'out_ch': out_ch,
+                            'recipe': args.recipe,
+                            'grad_weight': args.grad_weight if args.loss == 'l1g' else None,
+                            'ema': args.ema if ema is not None else None,
+                            'amp': amp,
                         }
                     }
                     temp_out = MODEL_OUT + ".tmp"
